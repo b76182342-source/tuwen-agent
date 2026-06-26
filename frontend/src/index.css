@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   暖白极简配色系统
+   ============================================================ */
+:root {
+  /* 主色 — 暖琥珀 */
+  --color-primary:        #D97706;
+  --color-primary-light:  #FB923C;
+  --color-primary-dark:   #B45309;
+  --color-primary-bg:     #FFF7ED;
+  --color-primary-border: #FED7AA;
+
+  /* 强调 — 墨绿 */
+  --color-accent:         #059669;
+  --color-accent-light:   #10B981;
+  --color-accent-bg:      #ECFDF5;
+  --color-accent-border:  #A7F3D0;
+
+  /* 表面 */
+  --color-surface-bg:     #FAF9F6;
+  --color-surface-card:   #FFFFFF;
+  --color-surface-hover:  #F5F5F4;
+
+  /* 文字 */
+  --color-text-primary:   #292524;
+  --color-text-secondary: #78716C;
+  --color-text-muted:     #A8A29E;
+
+  /* 边框 */
+  --color-border:         #E7E5E4;
+  --color-border-light:   #F5F5F4;
+
+  /* 圆角 */
+  --radius-sm:  8px;
+  --radius-md:  12px;
+  --radius-lg:  16px;
+  --radius-xl:  24px;
+
+  /* 阴影 */
+  --shadow-card:    0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
+  --shadow-elevated: 0 8px 32px rgba(0,0,0,0.08);
+  --shadow-button:  0 2px 8px rgba(217,119,6,0.2);
+
+  /* 渐变 */
+  --gradient-primary: linear-gradient(135deg, #D97706 0%, #FB923C 100%);
+  --gradient-accent:  linear-gradient(135deg, #059669 0%, #10B981 100%);
+}
+
+/* ============================================================
+   全局重置
+   ============================================================ */
+#root {
+  min-height: 100vh;
+  background: var(--color-surface-bg);
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', 'Roboto', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: var(--color-text-primary);
+  background: var(--color-surface-bg);
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+/* ============================================================
+   自定义滚动条
+   ============================================================ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-warm-300, #D6D3D1);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-warm-400, #A8A29E);
+}
+
+/* ============================================================
+   通用工具类
+   ============================================================ */
+@layer components {
+  .text-gradient {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}

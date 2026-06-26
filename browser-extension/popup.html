@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>抖音创作中心数据导入助手</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 400px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #333;
+    }
+
+    .container {
+      padding: 20px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+      color: white;
+    }
+
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .header p {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+
+    .status-card {
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .status-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .status-label {
+      font-size: 13px;
+      color: #666;
+    }
+
+    .status-value {
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .status-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+
+    .status-indicator.active {
+      background: #10b981;
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+    }
+
+    .status-indicator.inactive {
+      background: #ef4444;
+    }
+
+    .action-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-secondary {
+      background: white;
+      color: #667eea;
+      border: 2px solid #667eea;
+    }
+
+    .btn-secondary:hover {
+      background: #f0f4ff;
+    }
+
+    .btn-success {
+      background: #10b981;
+      color: white;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+    }
+
+    .btn-success:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(16, 185, 129, 0.5);
+    }
+
+    .data-preview {
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 16px;
+      max-height: 200px;
+      overflow-y: auto;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .data-item {
+      padding: 12px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .data-item:last-child {
+      border-bottom: none;
+    }
+
+    .data-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .data-stats {
+      font-size: 11px;
+      color: #666;
+      display: flex;
+      gap: 12px;
+    }
+
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 20px;
+      color: white;
+    }
+
+    .loading.active {
+      display: block;
+    }
+
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-top: 3px solid white;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 12px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .error-message {
+      background: #fee2e2;
+      color: #991b1b;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      margin-top: 12px;
+      display: none;
+    }
+
+    .error-message.active {
+      display: block;
+    }
+
+    .success-message {
+      background: #d1fae5;
+      color: #065f46;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      margin-top: 12px;
+      display: none;
+    }
+
+    .success-message.active {
+      display: block;
+    }
+
+    .settings {
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .manual-entry {
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .manual-entry .setting-item {
+      margin-bottom: 8px;
+    }
+
+    .manual-entry .setting-label {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 4px;
+      display: block;
+    }
+
+    .manual-entry .setting-input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    .manual-entry .setting-input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .settings h3 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #333;
+    }
+
+    .setting-item {
+      margin-bottom: 12px;
+    }
+
+    .setting-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .setting-label {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 4px;
+    }
+
+    .setting-input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    .setting-input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 16px;
+      color: white;
+      font-size: 11px;
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📥 抖音数据导入助手</h1>
+      <p>从抖音创作中心导入发布数据到Agent系统</p>
+    </div>
+
+    <div class="status-card">
+      <div class="status-item">
+        <div style="display: flex; align-items: center;">
+          <div class="status-indicator" id="page-status"></div>
+          <span class="status-label">页面状态</span>
+        </div>
+        <span class="status-value" id="page-status-text">检测中...</span>
+      </div>
+      <div class="status-item">
+        <div style="display: flex; align-items: center;">
+          <div class="status-indicator" id="backend-status"></div>
+          <span class="status-label">后端连接</span>
+        </div>
+        <span class="status-value" id="backend-status-text">检测中...</span>
+      </div>
+    </div>
+
+    <div class="action-buttons">
+      <button class="btn btn-primary" id="extract-btn" disabled>
+        📊 提取数据
+      </button>
+      <button class="btn btn-secondary" id="open-douyin-btn">
+        🌐 打开抖音创作中心
+      </button>
+    </div>
+
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <p>正在处理...</p>
+    </div>
+
+    <div class="error-message" id="error-message"></div>
+    <div class="success-message" id="success-message"></div>
+
+    <div class="data-preview" id="data-preview" style="display: none;">
+      <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #333;">
+        📋 数据预览 (<span id="data-count">0</span> 条)
+      </h3>
+      <div id="data-list"></div>
+    </div>
+
+    <!-- 手动录入区域 -->
+    <div class="manual-entry" id="manual-entry" style="display: none;">
+      <h3 style="font-size: 14px; font-weight: 600; color: #333; margin-bottom: 10px;">
+        ✏️ 手动录入（提取失败时使用）
+      </h3>
+      <div class="setting-item">
+        <div class="setting-label">文案内容 *</div>
+        <input type="text" class="setting-input" id="manual-text" placeholder="输入发布的文案内容">
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <div class="setting-item" style="flex: 1;">
+          <div class="setting-label">播放量</div>
+          <input type="number" class="setting-input" id="manual-views" placeholder="0" value="0" min="0">
+        </div>
+        <div class="setting-item" style="flex: 1;">
+          <div class="setting-label">点赞数</div>
+          <input type="number" class="setting-input" id="manual-likes" placeholder="0" value="0" min="0">
+        </div>
+        <div class="setting-item" style="flex: 1;">
+          <div class="setting-label">评论数</div>
+          <input type="number" class="setting-input" id="manual-comments" placeholder="0" value="0" min="0">
+        </div>
+      </div>
+      <button class="btn btn-success" id="manual-add-btn" style="margin-top: 10px;">
+        ➕ 添加到待导入列表
+      </button>
+    </div>
+
+    <div class="settings">
+      <h3>⚙️ 设置</h3>
+      <div class="setting-item">
+        <div class="setting-label">后端地址</div>
+        <input type="text" class="setting-input" id="backend-url" value="http://127.0.0.1:9000">
+      </div>
+      <div class="setting-item">
+        <div class="setting-label">自动导入</div>
+        <select class="setting-input" id="auto-import">
+          <option value="false">关闭</option>
+          <option value="true">开启</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>版本 1.0.0 | 抖音创作中心数据导入助手</p>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

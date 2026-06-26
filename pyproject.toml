@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "douyin-agent"
+version = "1.0.0"
+description = "抖音创作顾问 Agent"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "requests>=2.31.0",
+    "pydantic>=2.5.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+douyin-agent = "run_backend:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent", "skills", "utils", "backend"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.md"]

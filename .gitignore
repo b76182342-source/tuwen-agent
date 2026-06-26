@@ -1,0 +1,59 @@
+# ============================================================
+# 敏感配置（包含 API 密钥 — 绝对不能提交）
+# ============================================================
+.env
+*.env.local
+*.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*.py.backup
+*.egg-info/
+dist/
+build/
+*.egg
+venv/
+.venv/
+
+# SQLite 数据库（包含对话历史和用户数据）
+*.db
+*.db-journal
+*.db-wal
+
+# 会话状态
+state/current_session.json
+douyin_state.json
+
+# 图片下载目录（包含从 API 下载的图片）
+approved_images/
+personal_materials/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Node / 前端
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 临时文件
+*.tmp
+*.log
+server_stderr.log
+
+# Qdrant 数据
+.qdrant-initialized
+
+# 流量/粉丝数据（Excel 导出）
+流量数据.xlsx
+粉丝数据.xlsx
+nul

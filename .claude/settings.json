@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python skills/hashtag_recommender.py:*)",
+      "Bash(python skills/image_recommender.py:*)",
+      "Bash(python skills/music_recommender.py:*)",
+      "Bash(python skills/content_evaluator.py:*)",
+      "Bash(python skills/douyin_publisher.py:*)",
+      "Bash(python utils/memory.py:*)",
+      "Bash(python utils/test_memory.py:*)"
+    ]
+  }
+}

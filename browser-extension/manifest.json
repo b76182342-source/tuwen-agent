@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "抖音创作中心数据导入助手",
+  "version": "1.0.0",
+  "description": "帮助您从抖音创作中心导入发布数据到Agent系统，形成数据闭环",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://creator.douyin.com/*",
+    "https://creator.douyin.cn/*",
+    "http://127.0.0.1:9000/*",
+    "http://localhost:9000/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://creator.douyin.com/*",
+        "https://creator.douyin.cn/*"
+      ],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["content.js", "content.css"],
+      "matches": ["https://creator.douyin.com/*", "https://creator.douyin.cn/*"]
+    }
+  ]
+}
