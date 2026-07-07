@@ -7,17 +7,13 @@ import { useAppStore, saveMessagesToCache, loadMessagesFromCache } from '@/store
 import type { UploadFile } from 'antd/es/upload/interface';
 import { agentApi, conversationApi } from '@/services/api';
 import type { ExecutionStage, SkillStatus } from '@/types';
+import { useGSAP, gsap, animateMessageBubble, animateExpand, useGSAPHover } from '@/hooks/useAnimations';
 
 /* ============================================================
    Workspace — Claude Code 式极简对话工作台
    设计原则：去卡片化 · 大留白 · 柔边界 · 内容优先
    ============================================================ */
 
-// TODO: [架构] 当前组件约 386 行，在 React 中属于正常范围。
-//       如需拆分，可提取 ConversationListPanel.tsx、MessageInput.tsx 等子组件。
-//       当前阶段拆分收益有限，且会引入更多 props 传递和状态同步问题。
-
-// 生成会话摘要：从首条用户消息中提取关键词
 const generateConversationSummary = (content: string): string => {
   if (!content) return '新对话';
   const text = content.trim();
@@ -39,10 +35,22 @@ const Workspace: React.FC = () => {
   const [selectedConversations, setSelectedConversations] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const emptyRef = useRef<HTMLDivElement>(null);
+  const convPanelRef = useRef<HTMLDivElement>(null);
   const {
     conversationId, setConversationId,
     setExecutionStages, setExecutionResult,
   } = useAppStore();
+
+  const convItemHover = useGSAPHover(
+    { backgroundColor: '#F5F5F4', duration: 0.15, ease: 'power2.out' },
+    { backgroundColor: 'transparent', duration: 0.15, ease: 'power2.out' },
+  );
+  const pillHover = useGSAPHover(
+    { backgroundColor: '#FFF7ED', borderColor: '#FED7AA', color: '#B45309', duration: 0.15, ease: 'power2.out' },
+    { backgroundColor: '#fff', borderColor: '#E7E5E4', color: '#78716C', duration: 0.15, ease: 'power2.out' },
+  );
 
   useEffect(() => {
     initConversation();
@@ -55,7 +63,29 @@ const Workspace: React.FC = () => {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, sending]);
 
-  // focus input on mount
+  useGSAP(() => {
+    if (messages.length > 0) {
+      animateMessageBubble('.chat-message-row:last-child', false);
+      gsap.from('.sending-indicator', { opacity: 0, y: -8, duration: 0.25, ease: 'power2.out' });
+    }
+  }, { dependencies: [messages.length] });
+
+  useGSAP(() => {
+    if (!loaded) return;
+    const tl = gsap.timeline();
+    tl.from(containerRef.current, { opacity: 0, y: 16, duration: 0.5, ease: 'power2.out' });
+    if (messages.length === 0 && emptyRef.current) {
+      tl.from(emptyRef.current, { opacity: 0, y: 30, duration: 0.5, ease: 'power2.out' }, '+=0.1');
+      tl.from('.pill-suggestion', { opacity: 0, y: 12, duration: 0.3, stagger: 0.06, ease: 'power2.out' }, '+=0.2');
+    }
+  }, { dependencies: [loaded] });
+
+  useGSAP(() => {
+    if (showConversationList && convPanelRef.current) {
+      animateExpand(convPanelRef.current, 0.25);
+    }
+  }, { dependencies: [showConversationList] });
+
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 300); }, [loaded]);
 
   const initConversation = async () => {
@@ -85,17 +115,27 @@ const Workspace: React.FC = () => {
   };
 
   const loadConversationHistory = async (convId: string) => {
+    // 先用本地缓存立即渲染，避免页面切换时内容消失
+    const cached = loadMessagesFromCache(convId);
+    if (cached.length > 0) {
+      setMessages(cached as ChatMessageData[]);
+      setIteration(Math.floor(cached.length / 2));
+    }
+    // 再从后端同步最新数据
     try {
       const r = await conversationApi.getHistory(convId);
       const msgs = r.data.map((msg: any) => {
         const m = msg.metadata ? JSON.parse(msg.metadata) : {};
         return { role: msg.role, content: msg.content, tags: m.tags || [], images: m.images || [], musicList: m.music || [], score: m.evaluation_score, level: m.evaluation_level, suggestions: m.agent_suggestions || [] } as ChatMessageData;
       });
-      setMessages(msgs); setIteration(Math.floor(msgs.length / 2));
+      // 以后端数据为准（如果后端有更新的数据）
+      if (msgs.length >= cached.length) {
+        setMessages(msgs); setIteration(Math.floor(msgs.length / 2));
+      }
       if (msgs.length > 0) saveMessagesToCache(convId, msgs as any);
     } catch {
-      const cached = loadMessagesFromCache(convId);
-      if (cached.length > 0) { setMessages(cached as ChatMessageData[]); message.warning('后端未连接，显示本地缓存'); }
+      // 后端不可用时，已显示的缓存数据就是最新
+      if (cached.length === 0) message.warning('后端未连接，请检查服务是否启动');
     }
   };
 
@@ -129,7 +169,6 @@ const Workspace: React.FC = () => {
     if (selectedConversations.size === conversations.length) setSelectedConversations(new Set());
     else setSelectedConversations(new Set(conversations.map(c => c.conversation_id)));
   };
-  // 更新对话标题：从首条消息生成摘要
   const updateConversationTitle = async (convId: string, firstUserMessage: string) => {
     const summary = generateConversationSummary(firstUserMessage);
     if (summary && summary !== '新对话') {
@@ -141,7 +180,6 @@ const Workspace: React.FC = () => {
     const text = inputText.trim();
     if (!text && fileList.length === 0) return;
     const originFiles = fileList.filter(f => f.originFileObj);
-    // 本地预览用 blob URL
     const userImages = originFiles.map(f => ({ url: URL.createObjectURL(f.originFileObj!), path: f.name }));
     const userMsg: ChatMessageData = { role: 'user', content: text || '(图片素材)', images: userImages };
     const newMsgs = [...messages, userMsg];
@@ -156,13 +194,12 @@ const Workspace: React.FC = () => {
     setMessages([...newMsgs, { role: 'agent', skill: 'text', content: '思考中...' }]);
 
     try {
-      // 上传用户图片到后端 → 获得持久化 URL（跨轮次可用）
       let uploadedUrls: { url: string; path: string }[] = [];
       if (originFiles.length > 0) {
         const uploadPromises = originFiles.map(async (f) => {
           const form = new FormData();
           form.append('file', f.originFileObj as Blob, (f.originFileObj as File).name || f.name);
-          const res = await fetch('/api/upload', { method: 'POST', body: form });
+          const res = await fetch('/api/upload', { method: 'POST', body: form, headers: { 'X-API-Key': 'your-api-key-here' } });
           const data = await res.json();
           return { url: data.url, path: data.original_name || f.name };
         });
@@ -183,7 +220,6 @@ const Workspace: React.FC = () => {
       const finalMsgs = [...newMsgs, ...agentMsgs];
       setMessages(finalMsgs); setIteration(p => p + 1);
       saveMessagesToCache(conversationId, finalMsgs as any);
-      // 自动更新对话标题为用户首条消息的摘要
       if (messages.length === 0 && text) updateConversationTitle(conversationId, text);
       await loadConversations();
     } catch (e: any) {
@@ -205,7 +241,7 @@ const Workspace: React.FC = () => {
   if (!loaded) return <div style={{ display:'flex',justifyContent:'center',alignItems:'center',height:400 }}><Spin size="large" /></div>;
 
   return (
-    <div style={{ display:'flex',flexDirection:'column',height:'calc(100vh - 140px)',maxWidth:860,margin:'0 auto',width:'100%' }}>
+    <div ref={containerRef} style={{ display:'flex',flexDirection:'column',height:'calc(100vh - 140px)',maxWidth:860,margin:'0 auto',width:'100%' }}>
       {/* 离线提示 */}
       {!backendAvailable && (
         <div style={{ background:'#FFF7ED',border:'1px solid #FED7AA',borderRadius:10,padding:'8px 16px',marginBottom:12,display:'flex',alignItems:'center',justifyContent:'space-between' }}>
@@ -233,7 +269,7 @@ const Workspace: React.FC = () => {
 
       {/* 对话列表面板 — 浮层式 */}
       {showConversationList && (
-        <div style={{ marginBottom:12,background:'#FAF9F6',border:'1px solid #E7E5E4',borderRadius:12,padding:16 }}>
+        <div ref={convPanelRef} style={{ marginBottom:12,background:'#FAF9F6',border:'1px solid #E7E5E4',borderRadius:12,padding:16 }}>
           <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14 }}>
             <div style={{ display:'flex',alignItems:'center',gap:8 }}>
               <span style={{ fontWeight:600,fontSize:14,color:'#292524' }}>对话列表</span>
@@ -269,11 +305,10 @@ const Workspace: React.FC = () => {
                   padding:'8px 12px',borderRadius:8,cursor:'pointer',marginBottom:4,
                   background: selectedConversations.has(c.conversation_id) ? '#E8F5E9' : c.conversation_id === conversationId ? '#FFF7ED' : 'transparent',
                   border: selectedConversations.has(c.conversation_id) ? '1px solid #81C784' : c.conversation_id === conversationId ? '1px solid #FED7AA' : '1px solid transparent',
-                  transition:'all 0.15s',
                   display:'flex',alignItems:'center',gap:8,
                 }}
-                onMouseEnter={e => { if (!selectedConversations.has(c.conversation_id) && c.conversation_id !== conversationId) { e.currentTarget.style.background='#F5F5F4'; } }}
-                onMouseLeave={e => { if (!selectedConversations.has(c.conversation_id) && c.conversation_id !== conversationId) { e.currentTarget.style.background='transparent'; } }}
+                onMouseEnter={e => { if (!selectedConversations.has(c.conversation_id) && c.conversation_id !== conversationId) { convItemHover.onMouseEnter(e); } }}
+                onMouseLeave={e => { if (!selectedConversations.has(c.conversation_id) && c.conversation_id !== conversationId) { convItemHover.onMouseLeave(e); } }}
               >
                 {multiSelectMode && (
                   <Checkbox checked={selectedConversations.has(c.conversation_id)} onChange={() => toggleConversationSelect(c.conversation_id)} onClick={e => e.stopPropagation()} />
@@ -308,7 +343,7 @@ const Workspace: React.FC = () => {
       {/* 消息区域 — 核心对话空间 */}
       <div style={{ flex:1,overflowY:'auto',padding:'4px 0 20px' }}>
         {messages.length === 0 ? (
-          <div style={{ display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:320 }}>
+          <div ref={emptyRef} style={{ display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:320 }}>
             <div style={{ fontSize:40,marginBottom:16,opacity:0.6 }}>💬</div>
             <div style={{ fontSize:20,fontWeight:600,color:'#292524',marginBottom:6 }}>开始创作</div>
             <div style={{ fontSize:14,color:'#A8A29E',marginBottom:28,textAlign:'center',lineHeight:1.8 }}>
@@ -317,22 +352,21 @@ const Workspace: React.FC = () => {
             <div style={{ display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center' }}>
               {['春日旅行随拍','我的猫把花瓶推倒了','浴室好物推荐'].map(h => (
                 <span key={h} onClick={() => setInputText(h)}
+                  className="pill-suggestion"
                   style={{
                     padding:'6px 14px',borderRadius:18,fontSize:13,color:'#78716C',
                     background:'#fff',border:'1px solid #E7E5E4',cursor:'pointer',
-                    transition:'all 0.15s',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background='#FFF7ED'; e.currentTarget.style.borderColor='#FED7AA'; e.currentTarget.style.color='#B45309'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background='#fff'; e.currentTarget.style.borderColor='#E7E5E4'; e.currentTarget.style.color='#78716C'; }}
+                  {...pillHover}
                 >💡 {h}</span>
               ))}
             </div>
           </div>
         ) : (
-          messages.map((msg, i) => <ChatMessage key={i} message={msg} />)
+          messages.map((msg, i) => <div key={i} className="chat-message-row"><ChatMessage message={msg} /></div>)
         )}
         {sending && (
-          <div style={{ display:'flex',alignItems:'center',gap:10,padding:'12px 0',color:'#A8A29E',fontSize:13 }}>
+          <div className="sending-indicator" style={{ display:'flex',alignItems:'center',gap:10,padding:'12px 0',color:'#A8A29E',fontSize:13 }}>
             <Spin size="small" /> Agent 思考中...
           </div>
         )}

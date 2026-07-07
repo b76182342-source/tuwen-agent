@@ -134,7 +134,7 @@ const ResultDisplay: React.FC = () => {
               <Rate disabled value={Math.round(evaluation.score)} />
               <span style={{
                 marginLeft: 8, fontSize: 20, fontWeight: 700,
-                color: evaluation.score >= 4 ? '#10B981' : '#F59E0B',
+                color: evaluation.score >= 4 ? '#0891b2' : '#f59e0b',
               }}>
                 {evaluation.score.toFixed(1)}/5.0
               </span>

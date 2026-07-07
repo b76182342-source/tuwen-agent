@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Layout, Menu } from 'antd';
 import {
   EditOutlined,
@@ -9,6 +9,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useGSAP, gsap } from '@/hooks/useAnimations';
 
 const { Header, Content, Sider } = Layout;
 
@@ -28,6 +29,12 @@ interface AppLayoutProps {
 const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // GSAP: 路由切换 — 内容区从透明到显现
+  useGSAP(() => {
+    gsap.fromTo(contentRef.current, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.3, ease: 'power2.out' });
+  }, { dependencies: [location.pathname], scope: contentRef });
 
   return (
     <Layout style={{ minHeight: '100vh', background: 'var(--color-surface-bg)' }}>
@@ -87,6 +94,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         {/* Content — 暖白底 + 白色卡片 */}
         <Layout style={{ background: 'transparent', padding: '12px 24px 20px 8px' }}>
           <Content
+            ref={contentRef}
             style={{
               padding: 24,
               margin: 0,

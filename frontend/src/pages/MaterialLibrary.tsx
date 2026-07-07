@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Card,
   Table,
@@ -26,6 +26,7 @@ import {
 } from '@ant-design/icons';
 import { materialApi, publishApi } from '@/services/api';
 import type { Material, MaterialType, PublishHistory } from '@/types';
+import { usePresetCardStagger } from '@/hooks/useAnimations';
 
 const fetchMaterials = async (
   activeTab: string,
@@ -52,6 +53,7 @@ const MaterialLibrary: React.FC = () => {
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
   const [modalType, setModalType] = useState<MaterialType>('text');
   const [form] = Form.useForm();
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // 从发布历史导入相关状态
   const [historyModalVisible, setHistoryModalVisible] = useState(false);
@@ -91,11 +93,9 @@ const MaterialLibrary: React.FC = () => {
     let successCount = 0;
     for (const item of selectedHistory) {
       try {
-        // 注意：这里需要获取文案内容，由于历史记录中没有存储文案，
-        // 需要在后端根据 text_id 查询或直接使用已有的素材
         await materialApi.addMaterial({
           material_type: 'text',
-          original_content: `发布记录 #${item.id} (评分: ${item.evaluation_score})`,
+          original_content: item.text || `发布记录 #${item.id} (评分: ${item.evaluation_score})`,
         });
         successCount++;
       } catch {
@@ -120,6 +120,7 @@ const MaterialLibrary: React.FC = () => {
       width: 60,
       render: (_: any, record: PublishHistory) => (
         <CheckCircleOutlined
+          key={record.id}
           style={{
             fontSize: 18,
             color: selectedHistory.some((h) => h.id === record.id) ? '#1890ff' : '#d9d9d9',
@@ -155,7 +156,7 @@ const MaterialLibrary: React.FC = () => {
       key: 'evaluation_score',
       width: 80,
       render: (score: number) => (
-        <Tag color={score >= 4 ? 'green' : score >= 3 ? 'gold' : 'red'}>{score.toFixed(1)}</Tag>
+        <Tag color={score >= 4 ? 'cyan' : score >= 3 ? 'orange' : 'red'}>{score.toFixed(1)}</Tag>
       ),
     },
     {
@@ -188,8 +189,8 @@ const MaterialLibrary: React.FC = () => {
       dataIndex: 'source',
       key: 'source',
       width: 80,
-      render: (source: string) => (
-        <Tag color={source === 'extension' ? 'blue' : 'default'}>
+      render: (source: string, record: PublishHistory) => (
+        <Tag key={record.id} color={source === 'extension' ? 'cyan' : 'default'}>
           {source === 'extension' ? '扩展' : '手动'}
         </Tag>
       ),
@@ -200,6 +201,9 @@ const MaterialLibrary: React.FC = () => {
     loadMaterials();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // GSAP: 卡片交错入场（数据加载完成后触发）
+  usePresetCardStagger(containerRef, 'material-card', 'material', { ready: !loading });
 
   const handleAdd = () => {
     setEditingMaterial(null);
@@ -336,8 +340,8 @@ const MaterialLibrary: React.FC = () => {
   ];
 
   return (
-    <div>
-      <Card
+    <div ref={containerRef}>
+      <Card className="material-card"
         title="📦 素材库管理"
         extra={
           <Space>
@@ -437,9 +441,9 @@ const MaterialLibrary: React.FC = () => {
       >
         <div style={{ marginBottom: 16 }}>
           <Space>
-            <span style={{ color: '#666' }}>选择发布记录将其添加到素材库：</span>
+            <span style={{ color: 'var(--color-text-secondary)' }}>选择发布记录将其添加到素材库：</span>
             {selectedHistory.length > 0 && (
-              <Tag color="blue">已选择 {selectedHistory.length} 条</Tag>
+              <Tag color="cyan">已选择 {selectedHistory.length} 条</Tag>
             )}
           </Space>
         </div>

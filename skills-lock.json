@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "skills": {
+    "gsap-animate": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-animate/SKILL.md",
+      "computedHash": "6e1e099328315510ffb26af7da38ae578509eee8a5ffb269d71f150a66bfff26"
+    },
+    "gsap-canvas": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-canvas/SKILL.md",
+      "computedHash": "8b484a7e5bb00ee04d3a573acb592b1c6ae27e41b2f49d382d3c74e444431aff"
+    },
+    "gsap-core": {
+      "source": "greensock/gsap-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-core/SKILL.md",
+      "computedHash": "b891c9ed42d9319685250231085ebe21538f2c844613b277b9dd2b3ff529a542"
+    },
+    "gsap-cursor": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-cursor/SKILL.md",
+      "computedHash": "fe47ef4c91abffc446cd6421f158f7124b315e79a8e0c86117fb635984750c4b"
+    },
+    "gsap-frameworks": {
+      "source": "greensock/gsap-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-frameworks/SKILL.md",
+      "computedHash": "08b3917649997d53f94a9831b5db21afafafc89ee3a9a020d2471c69c336bdd6"
+    },
+    "gsap-interact": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-interact/SKILL.md",
+      "computedHash": "5dc25c9cb9bb3845de489a8e0219f23f81d76c83fd6c2c668d1f5b3e5d6e40c4"
+    },
+    "gsap-optimise": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-optimise/SKILL.md",
+      "computedHash": "1b895e5b845eb2074749e97d15cc50c931803cc47349a72647b642e05ab2da9e"
+    },
+    "gsap-performance": {
+      "source": "greensock/gsap-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-performance/SKILL.md",
+      "computedHash": "da73dbf11663abb1a880e1796367f84b19877db4a16186b36d1dce96fe0ce983"
+    },
+    "gsap-plugins": {
+      "source": "greensock/gsap-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-plugins/SKILL.md",
+      "computedHash": "50a320904c3053a1a7d01ea95235944814d18c0b5958f17e38046504aa6078a8"
+    },
+    "gsap-react": {
+      "source": "greensock/gsap-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-react/SKILL.md",
+      "computedHash": "255206fb6a4a079ad73b4a12e7c63197dc451a8549c7ac4e852b50ff74ef3bd6"
+    },
+    "gsap-scroll": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-scroll/SKILL.md",
+      "computedHash": "c8b629fff93a8014a27ed65af07c89f9fc575cc52854aa8a1f73caafdc1b716a"
+    },
+    "gsap-scrolltrigger": {
+      "source": "greensock/gsap-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-scrolltrigger/SKILL.md",
+      "computedHash": "358dd3381c74fc4be8db5a94e0cd008bf0fa7c1ccd45999671b0d61b9d9ffd9b"
+    },
+    "gsap-setup": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-setup/SKILL.md",
+      "computedHash": "442db612bf232bb60c5ca15f7a5a6e66c91bde41f52c6a7ef05dcf083c6992ad"
+    },
+    "gsap-showcase": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-showcase/SKILL.md",
+      "computedHash": "c424ab69261511ae0fa063006b01120da3db5fd1445535466a3135c0c5982a97"
+    },
+    "gsap-svg": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-svg/SKILL.md",
+      "computedHash": "2e8da672bb8fbe4d3c5c6d3ba980b5faa22414d85793e05d0f107453751e148f"
+    },
+    "gsap-test": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-test/SKILL.md",
+      "computedHash": "32486a10350cb90bb87e4a87324bd4ec7d4df304ba76e6ccabaa1fe42275aa9c"
+    },
+    "gsap-text": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-text/SKILL.md",
+      "computedHash": "0877ad9cd24ba4d9c6fda86fb3db7ad9e6732f49a61bcf87509c864ccce2be75"
+    },
+    "gsap-timeline": {
+      "source": "greensock/gsap-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-timeline/SKILL.md",
+      "computedHash": "e7c07909bb427f74e1bda1ff716bd97ae166269382f7abbd649c0d1ba8f6e0ec"
+    },
+    "gsap-utils": {
+      "source": "greensock/gsap-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-utils/SKILL.md",
+      "computedHash": "72af4a036d417d6eaef7478eca2f28e760631fb78db822ba34a9c706797aab62"
+    },
+    "gsap-vfx": {
+      "source": "iotron/gsap-cookbook",
+      "sourceType": "github",
+      "skillPath": "skills/gsap-vfx/SKILL.md",
+      "computedHash": "3010d0b952f312bf3d0be8c27c5885b2b8c22ecb5518b4259f4f687a841a5bd8"
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Image, Row, Col, message } from 'antd';
 import { PlayCircleOutlined, PauseCircleOutlined, LoadingOutlined } from '@ant-design/icons';
+import { useGSAP, gsap, animateMessageBubble, animateCrossfade, animateExpand } from '@/hooks/useAnimations';
 
 /* ============================================================
    ChatMessage — 极简 · 紧凑 · 亲和
@@ -38,6 +39,8 @@ const MusicPreview: React.FC<{ url: string; name: string }> = ({ url, name }) =>
   const [progress, setProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const btnRef = useRef<HTMLSpanElement>(null);
+  const barRef = useRef<HTMLSpanElement>(null);
 
   const stop = useCallback(() => {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
@@ -47,6 +50,21 @@ const MusicPreview: React.FC<{ url: string; name: string }> = ({ url, name }) =>
   }, []);
 
   useEffect(() => () => stop(), [stop]);
+
+  // GSAP: 播放按钮颜色过渡
+  useGSAP(() => {
+    gsap.to(btnRef.current, {
+      backgroundColor: playing ? '#D97706' : 'transparent',
+      color: playing ? '#fff' : '#A8A29E',
+      duration: 0.15,
+      ease: 'power2.out',
+    });
+  }, { dependencies: [playing] });
+
+  // GSAP: 进度条动画
+  useGSAP(() => {
+    gsap.to(barRef.current, { width: `${progress}%`, duration: 0.15, ease: 'power1.out' });
+  }, { dependencies: [progress] });
 
   const toggle = () => {
     if (playing) { stop(); return; }
@@ -62,12 +80,12 @@ const MusicPreview: React.FC<{ url: string; name: string }> = ({ url, name }) =>
 
   return (
     <span style={{ display:'inline-flex',alignItems:'center',gap:4,flexShrink:0 }}>
-      <span onClick={toggle} style={{ cursor:'pointer',display:'inline-flex',alignItems:'center',justifyContent:'center',width:20,height:20,borderRadius:'50%',background:playing?'#D97706':'transparent',color:playing?'#fff':'#A8A29E',fontSize:12,transition:'all 0.15s',userSelect:'none' }}>
+      <span ref={btnRef} onClick={toggle} style={{ cursor:'pointer',display:'inline-flex',alignItems:'center',justifyContent:'center',width:20,height:20,borderRadius:'50%',background:'transparent',color:'#A8A29E',fontSize:12,userSelect:'none' }}>
         {loading ? <LoadingOutlined spin /> : error ? '⚠' : playing ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
       </span>
       {playing && (
         <span style={{ width:28,height:2,background:'#E7E5E4',borderRadius:1,overflow:'hidden' }}>
-          <span style={{ display:'block',width:`${progress}%`,height:'100%',background:'#D97706',borderRadius:1,transition:'width 0.15s' }} />
+          <span ref={barRef} style={{ display:'block',width:'0%',height:'100%',background:'#D97706',borderRadius:1 }} />
         </span>
       )}
     </span>
@@ -92,7 +110,34 @@ const ShowcaseCard: React.FC<{ s: NonNullable<ChatMessageData['showcase']>; scor
   const [tagsOpen, setTagsOpen] = useState(false);
   const [musicOpen, setMusicOpen] = useState(false);
   const [mIdx, setMIdx] = useState(0);
+  const imgRef = useRef<HTMLDivElement>(null);
+  const dotsRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const vt = tagsOpen ? s.tags : s.tags.slice(0, 3);
+
+  // GSAP: 图片切换交叉淡入
+  useGSAP(() => {
+    animateCrossfade(imgRef.current);
+  }, { dependencies: [idx] });
+
+  // GSAP: 圆点动画
+  useGSAP(() => {
+    if (dotsRef.current) {
+      gsap.to(dotsRef.current.querySelectorAll('.carousel-dot'), {
+        width: (i: number) => i === idx ? 14 : 4,
+        background: (i: number) => i === idx ? '#fff' : 'rgba(255,255,255,0.4)',
+        duration: 0.2,
+        ease: 'power2.out',
+      });
+    }
+  }, { dependencies: [idx] });
+
+  // GSAP: 配乐下拉动画
+  useGSAP(() => {
+    if (musicOpen && dropdownRef.current) {
+      animateExpand(dropdownRef.current, 0.2);
+    }
+  }, { dependencies: [musicOpen] });
 
   return (
     <div style={{ marginTop:16 }}>
@@ -100,13 +145,13 @@ const ShowcaseCard: React.FC<{ s: NonNullable<ChatMessageData['showcase']>; scor
         {/* 图片 */}
         {s.images.length > 0 ? (
           <div style={{ position:'relative',aspectRatio:'4/5',background:'#292524' }}>
-            <Image src={s.images[idx].url} width="100%" height="100%" style={{ objectFit:'cover' }} preview={false} />
+            <div ref={imgRef}><Image src={s.images[idx].url} width="100%" height="100%" style={{ objectFit:'cover' }} preview={false} /></div>
             <div style={{ position:'absolute',bottom:0,left:0,right:0,height:'30%',background:'linear-gradient(transparent,rgba(0,0,0,0.15))',pointerEvents:'none' }} />
             {s.images.length > 1 && <>
               <span onClick={() => setIdx(p=>(p-1+s.images.length)%s.images.length)} style={{ position:'absolute',left:6,top:'50%',transform:'translateY(-50%)',width:24,height:24,borderRadius:'50%',background:'rgba(255,255,255,0.8)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:14,color:'#444' }}>‹</span>
               <span onClick={() => setIdx(p=>(p+1)%s.images.length)} style={{ position:'absolute',right:6,top:'50%',transform:'translateY(-50%)',width:24,height:24,borderRadius:'50%',background:'rgba(255,255,255,0.8)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:14,color:'#444' }}>›</span>
-              <div style={{ position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',display:'flex',gap:4 }}>
-                {s.images.map((_,i) => <span key={i} style={{ width:i===idx?14:4,height:4,borderRadius:2,background:i===idx?'#fff':'rgba(255,255,255,0.4)',transition:'all 0.2s' }} />)}
+              <div ref={dotsRef} style={{ position:'absolute',bottom:8,left:'50%',transform:'translateX(-50%)',display:'flex',gap:4 }}>
+                {s.images.map((_,i) => <span key={i} className="carousel-dot" style={{ width:i===idx?14:4,height:4,borderRadius:2,background:i===idx?'#fff':'rgba(255,255,255,0.4)' }} />)}
               </div>
             </>}
             <span style={{ position:'absolute',top:8,right:8,background:'rgba(0,0,0,0.3)',color:'#fff',padding:'1px 7px',borderRadius:6,fontSize:10 }}>{idx+1}/{s.images.length}</span>
@@ -134,7 +179,7 @@ const ShowcaseCard: React.FC<{ s: NonNullable<ChatMessageData['showcase']>; scor
               ♪ {s.music[mIdx]?.name || '配乐'} {musicOpen?'▲':'▼'}
             </span>
             {musicOpen && (
-              <div style={{ position:'absolute',bottom:36,left:6,right:6,background:'#fff',borderRadius:8,border:'1px solid #E7E5E4',boxShadow:'0 2px 12px rgba(0,0,0,0.05)',padding:'2px 0',zIndex:3 }}>
+              <div ref={dropdownRef} style={{ position:'absolute',bottom:36,left:6,right:6,background:'#fff',borderRadius:8,border:'1px solid #E7E5E4',boxShadow:'0 2px 12px rgba(0,0,0,0.05)',padding:'2px 0',zIndex:3 }}>
                 {s.music.map((m,i) => (
                   <div key={i} onClick={() => { setMIdx(i); setMusicOpen(false); }} style={{ display:'flex',alignItems:'center',gap:6,padding:'6px 12px',cursor:'pointer',fontSize:12,color:i===mIdx?'#B45309':'#44403C',fontWeight:i===mIdx?500:400,background:i===mIdx?'#FFF7ED':'transparent' }}>
                     {m.name}{m.artist && <span style={{ color:'#A8A29E',fontSize:11 }}>— {m.artist}</span>}
@@ -156,11 +201,17 @@ const ShowcaseCard: React.FC<{ s: NonNullable<ChatMessageData['showcase']>; scor
 // ============================================================
 const ChatMessage: React.FC<{ message: ChatMessageData }> = ({ message }) => {
   const { role, skill, content, images, tags, musicList, score, level, suggestions } = message;
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  // GSAP: 消息气泡入场动画
+  useGSAP(() => {
+    animateMessageBubble(rowRef.current, role === 'user');
+  }, []);
 
   // ── 用户 — 柔暖色气泡，只有背景没有边框 ──
   if (role === 'user') {
     return (
-      <div style={{ display:'flex',justifyContent:'flex-end',marginBottom:24,padding:'0 8px' }}>
+      <div ref={rowRef} style={{ display:'flex',justifyContent:'flex-end',marginBottom:24,padding:'0 8px' }}>
         <div style={{ maxWidth:'72%' }}>
           <div style={{ background:'#FFF7ED',color:'#44403C',borderRadius:14,padding:'10px 16px',fontSize:14,lineHeight:1.65,wordBreak:'break-word' }}>
             {content}
@@ -180,7 +231,7 @@ const ChatMessage: React.FC<{ message: ChatMessageData }> = ({ message }) => {
   const label = skill ? skillLabel[skill] : '';
 
   return (
-    <div style={{ marginBottom:26,padding:'0 8px' }}>
+    <div ref={rowRef} style={{ marginBottom:26,padding:'0 8px' }}>
 
       {/* 第一段：极简标记 — 仅圆点 + 文字 */}
       <div style={{ display:'flex',alignItems:'center',gap:8,marginBottom:8 }}>

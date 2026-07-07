@@ -99,3 +99,27 @@ code {
     background-clip: text;
   }
 }
+
+/* ============================================================
+   GSAP 动画辅助
+   ============================================================ */
+
+/* CSS 过渡辅助 — 配合 GSAP hover 使用 */
+.gsap-transition-colors {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.gsap-transition-opacity {
+  transition: opacity 0.15s ease;
+}
+.gsap-transition-transform {
+  transition: transform 0.2s ease;
+}
+
+/* will-change — 对 GSAP 动画元素提前提示 GPU 加速 */
+.analytics-card,
+.analytics-chart,
+.history-card,
+.material-card,
+.sync-card {
+  will-change: transform, opacity;
+}

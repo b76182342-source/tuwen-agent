@@ -27,6 +27,7 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   config.headers['X-Request-Id'] = crypto.randomUUID?.() ||
     `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  config.headers['X-API-Key'] = 'your-api-key-here';
   return config;
 });
 

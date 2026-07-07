@@ -1,7 +1,7 @@
 /**
  * 发布历史页 v2 — 对齐抖音数据维度
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card, Table, Tag, Button, Space, Modal, Descriptions, message, Statistic, Row, Col } from 'antd';
 import {
   EyeOutlined, LikeOutlined, ReloadOutlined, DeleteOutlined,
@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom';
 import { publishApi } from '@/services/api';
 import type { PublishHistory } from '@/types';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { usePresetCardStagger } from '@/hooks/useAnimations';
 
 const CHART = { likes: '#059669', views: '#2563EB', comments: '#78716C' };
 
@@ -20,6 +21,7 @@ const PublishHistoryPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<PublishHistory | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -28,6 +30,9 @@ const PublishHistoryPage: React.FC = () => {
       .catch(() => message.error('获取发布历史失败'))
       .finally(() => setLoading(false));
   }, []);
+
+  // GSAP: 卡片交错入场（数据加载完成后触发）
+  usePresetCardStagger(containerRef, 'history-card', 'history', { ready: !loading });
 
   const handleDelete = (item: PublishHistory) => {
     Modal.confirm({
@@ -69,12 +74,12 @@ const PublishHistoryPage: React.FC = () => {
     { title: '划走率', dataIndex: 'swipe_away_rate', width: 70, render: (v: number) => v ? `${(v * 100).toFixed(0)}%` : '-' },
     { title: '涨粉', dataIndex: 'fan_gain', width: 60, render: (v: number) => (<span style={{ color: '#059669' }}><RiseOutlined /> {v || 0}</span>) },
     { title: '来源', dataIndex: 'source', width: 70, render: (v: string) => (
-      <Tag color={v === 'extension' ? 'blue' : v === 'agent' ? 'purple' : 'gray'}>
+      <Tag color={v === 'extension' ? 'cyan' : v === 'agent' ? 'purple' : 'default'}>
         {v === 'extension' ? '扩展' : v === 'agent' ? 'Agent' : '手动'}
       </Tag>
     )},
     { title: '评分', dataIndex: 'evaluation_score', width: 60, render: (v: number) => (
-      <Tag color={v >= 4 ? 'green' : v >= 3 ? 'orange' : 'red'}>{v?.toFixed(1) || '-'}</Tag>
+      <Tag color={v >= 4 ? 'cyan' : v >= 3 ? 'orange' : 'red'}>{v?.toFixed(1) || '-'}</Tag>
     )},
     { title: '操作', key: 'action', width: 120,
       render: (_: any, r: PublishHistory) => (
@@ -87,29 +92,29 @@ const PublishHistoryPage: React.FC = () => {
   ];
 
   return (
-    <div>
+    <div ref={containerRef}>
       <Row gutter={16} style={{ marginBottom: 16 }}>
         {[
-          { title: '总内容', value: history.length, icon: <TrophyOutlined />, color: '#D97706' },
+          { title: '总内容', value: history.length, icon: <TrophyOutlined />, color: '#2563EB' },
           { title: '总播放', value: totalViews, icon: <EyeOutlined />, color: '#2563EB' },
           { title: '总点赞', value: totalLikes, icon: <LikeOutlined />, color: '#059669' },
-          { title: '总涨粉', value: totalFanGain, icon: <RiseOutlined />, color: '#7C3AED' },
+          { title: '总涨粉', value: totalFanGain, icon: <RiseOutlined />, color: '#7c4dff' },
         ].map(c => (
           <Col span={6} key={c.title}>
-            <Card size="small">
+            <Card size="small" className="history-card">
               <Statistic title={c.title} value={c.value} prefix={c.icon} valueStyle={{ color: c.color, fontSize: 20, fontWeight: 700 }} />
             </Card>
           </Col>
         ))}
       </Row>
 
-      <Card title="📈 播放/点赞/评论趋势" size="small" style={{ marginBottom: 16 }}>
+      <Card title="📈 播放/点赞/评论趋势" size="small" className="history-card" style={{ marginBottom: 16 }}>
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={240}>
             <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E7E5E4" />
-              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#555568' }} />
+              <YAxis tick={{ fontSize: 11, fill: '#555568' }} />
               <Tooltip />
               <Legend />
               <Line type="monotone" dataKey="views" stroke={CHART.views} name="播放" strokeWidth={2} dot={false} />
@@ -118,11 +123,11 @@ const PublishHistoryPage: React.FC = () => {
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div style={{ color: '#A8A29E', textAlign: 'center', padding: 24 }}>暂无数据</div>
+          <div style={{ color: '#555568', textAlign: 'center', padding: 24 }}>暂无数据</div>
         )}
       </Card>
 
-      <Card title="📋 发布历史" loading={loading}>
+      <Card title="📋 发布历史" loading={loading} className="history-card">
         <Table columns={columns} dataSource={history} rowKey="id"
           pagination={{ pageSize: 20 }} size="small" scroll={{ x: 1200 }}
           locale={{ emptyText: '暂无发布记录。前往"数据同步"页导入数据。' }} />
@@ -134,7 +139,7 @@ const PublishHistoryPage: React.FC = () => {
             <Descriptions.Item label="文案" span={2}>{selected.text}</Descriptions.Item>
             <Descriptions.Item label="发布时间">{selected.publish_time}</Descriptions.Item>
             <Descriptions.Item label="来源">
-              <Tag color={selected.source === 'extension' ? 'blue' : selected.source === 'agent' ? 'purple' : 'gray'}>
+              <Tag color={selected.source === 'extension' ? 'cyan' : selected.source === 'agent' ? 'purple' : 'default'}>
                 {selected.source === 'extension' ? '浏览器扩展' : selected.source === 'agent' ? 'Agent生成' : '手动录入'}
               </Tag>
             </Descriptions.Item>

@@ -21,6 +21,57 @@ from utils.config import (
 # 抖音 token 缓存
 _douyin_token_cache = {"token": None, "expires_at": 0}
 
+# 情绪 → 音乐风格映射
+EMOTION_TO_STYLE = {
+    "搞笑": ["欢快卡点", "搞笑音效", "魔性循环", "轻松搞怪"],
+    "温馨": ["轻音乐", "治愈系", "抒情慢歌", "甜蜜旋律"],
+    "伤感": ["抒情慢歌", "钢琴曲", "伤感BGM", "走心BGM"],
+    "励志": ["动感活力", "大气磅礴", "节奏感强", "史诗BGM"],
+    "日常": ["轻松舒缓", "生活BGM", "轻快旋律", "民谣"],
+    "吐槽": ["搞笑音效", "魔性循环", "轻松搞怪", "轻松活泼"],
+    "兴奋": ["电子音乐", "节奏感强", "动感活力", "鼓点"],
+    "浪漫": ["浪漫BGM", "甜蜜旋律", "钢琴曲", "轻音乐"],
+    "恐怖": ["悬疑BGM", "低音氛围", "恐怖音效"],
+    "怀旧": ["复古BGM", "经典老歌", "钢琴曲", "民谣"],
+    "时尚": ["电子音乐", "潮流BGM", "节奏感强", "时尚BGM"],
+    "美食": ["轻松舒缓", "美食BGM", "烹饪节奏", "轻松活力"],
+    "旅行": ["轻音乐", "自然音效", "治愈系", "大气磅礴"],
+}
+
+
+def _emotion_to_styles(emotion: Dict) -> List[str]:
+    """将情绪分析结果转换为音乐风格列表"""
+    mood = emotion.get("mood", "日常")
+    energy = emotion.get("energy", "medium")
+    keywords = emotion.get("keywords", [])
+
+    styles = set()
+
+    # 主情绪映射
+    for mood_key, style_list in EMOTION_TO_STYLE.items():
+        if mood_key in mood or mood in mood_key:
+            styles.update(style_list[:2])
+            break
+
+    if not styles:
+        styles.update(EMOTION_TO_STYLE.get("日常", [])[:2])
+
+    # 能量调整
+    if energy == "high":
+        styles.update(["动感活力", "节奏感强"])
+    elif energy == "low":
+        styles.update(["轻音乐", "舒缓"])
+
+    # 关键词补充
+    for kw in keywords:
+        for mood_key, style_list in EMOTION_TO_STYLE.items():
+            if kw in mood_key or mood_key in kw:
+                styles.add(style_list[0])
+                break
+
+    return list(styles)[:5]
+
+
 TAG_TO_STYLE = {
     "萌宠": ["欢快卡点", "搞笑音效", "轻松活泼"],
     "搞笑": ["欢快卡点", "搞笑音效", "魔性循环"],
@@ -633,20 +684,26 @@ def _analyze_mood_from_text(text: str) -> str:
     return ""
 
 
-def _recommend_via_rules(tags: List[str], text: str = "") -> List[Dict]:
-    """基于规则映射生成配乐推荐"""
+def _recommend_via_rules(tags: List[str], text: str = "", extra_styles: List[str] = None) -> List[Dict]:
+    """基于规则映射生成配乐推荐（支持情绪驱动的补充风格）"""
     matched_styles = set()
-    
+
+    # 标签 → 风格
     for tag in tags:
         tag_clean = tag.replace("#", "")
         for keyword, styles in TAG_TO_STYLE.items():
             if keyword in tag_clean:
                 matched_styles.update(styles)
-    
+
+    # 情绪驱动的风格（优先级更高）
+    if extra_styles:
+        matched_styles.update(extra_styles)
+
+    # 文本情绪分析（回退）
     mood = _analyze_mood_from_text(text)
     if mood and mood in MOOD_TO_STYLE:
         matched_styles.update(MOOD_TO_STYLE[mood])
-    
+
     if not matched_styles:
         matched_styles = {"治愈系", "民谣", "轻音乐"}
     
@@ -690,7 +747,8 @@ def recommend_music(
     use_api: bool = True,
     source: str = "netease",
     fetch_urls: bool = False,
-    chart_type: str = "all"
+    chart_type: str = "all",
+    emotion: Optional[Dict] = None,
 ) -> List[Dict]:
     """主函数：优先抖音官方榜单 API，失败则用规则映射
 
@@ -699,15 +757,20 @@ def recommend_music(
         text: 文案（可选）
         use_api: 是否使用 API
         source: 数据源
-            - "douyin"（默认）：抖音官方音乐榜单
-            - "netease" / "tencent" / "kuwo" / "kugou" / "migu"：GD Studio API
-        fetch_urls: 是否获取可播放 URL（仅 GD API 支持）
-        chart_type: 抖音榜单类型 (all/hot/rising/original)
+        fetch_urls: 是否获取可播放 URL
+        chart_type: 抖音榜单类型
+        emotion: 情绪分析结果（从 analyze_emotion 获取）
 
     Returns:
         推荐配乐列表
     """
     music_list = []
+
+    # 情绪驱动的风格标签
+    emotion_styles = []
+    if emotion:
+        emotion_styles = _emotion_to_styles(emotion)
+        print(f"[配乐] 情绪分析: {emotion.get('mood', '?')} → {emotion_styles}")
 
     if use_api:
         if source == "douyin":
@@ -719,11 +782,7 @@ def recommend_music(
 
     if not music_list:
         print("[配乐推荐] 使用规则映射")
-        music_list = _recommend_via_rules(tags, text)
-
-    if not music_list:
-        print("[配乐推荐] 使用规则映射")
-        music_list = _recommend_via_rules(tags, text)
+        music_list = _recommend_via_rules(tags, text, extra_styles=emotion_styles)
 
     music_list = _deduplicate(music_list)[:5]
 

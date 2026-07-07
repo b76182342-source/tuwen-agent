@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Steps, Spin } from 'antd';
 import { CheckCircleOutlined, LoadingOutlined, ClockCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useAppStore } from '@/stores/appStore';
+import { useGSAP, gsap } from '@/hooks/useAnimations';
 
 /* ============================================================
    ExecutionFlow — 极简步骤条，无卡片包裹
@@ -40,7 +41,13 @@ const ExecutionFlow: React.FC = () => {
   const hasFailed = executionStages.some(s => s.status === 'failed');
   const isRunning = executionStages.some(s => s.status === 'running');
 
+  const dotRef = useRef<HTMLSpanElement>(null);
   const dotColor = allDone ? '#78716C' : hasFailed ? '#B45309' : isRunning ? '#D97706' : '#D6D3D1';
+
+  // GSAP: 状态圆点颜色过渡
+  useGSAP(() => {
+    gsap.to(dotRef.current, { backgroundColor: dotColor, duration: 0.3, ease: 'power2.out' });
+  }, { dependencies: [dotColor] });
 
   if (executionStages.length === 0) return null;
 
@@ -48,7 +55,7 @@ const ExecutionFlow: React.FC = () => {
     <div style={{ padding:'2px 0 6px' }}>
       {/* 极简状态行 */}
       <div style={{ display:'flex',alignItems:'center',gap:8,marginBottom:6 }}>
-        <span style={{ width:6,height:6,borderRadius:'50%',background:dotColor,flexShrink:0,transition:'background 0.3s' }} />
+        <span ref={dotRef} style={{ width:6,height:6,borderRadius:'50%',background:dotColor,flexShrink:0 }} />
         <span style={{ fontSize:12,color:'#A8A29E' }}>
           {allDone ? '全部完成' : hasFailed ? '执行出错' : isRunning ? '执行中...' : '等待执行'}
         </span>

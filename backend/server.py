@@ -37,7 +37,7 @@ import logging
 logger = logging.getLogger("douyin-agent")
 
 # 导入技能模块
-from skills.hashtag_recommender import HashtagRecommender
+from skills.hashtag_recommender import HashtagRecommender, analyze_emotion
 from skills.image_recommender import recommend_images
 from skills.music_recommender import recommend_music
 from skills.content_evaluator import evaluate
@@ -897,6 +897,11 @@ async def agent_run(request: Request):
     from concurrent.futures import ThreadPoolExecutor, as_completed
     t_skills_start = time.time()
 
+    # ── 情绪分析（共享给 Skill1 和 Skill3）──
+    t_emotion = time.time()
+    emotion = analyze_emotion(text)
+    print(f"[后端] 情绪分析完成 ({time.time()-t_emotion:.1f}s): mood={emotion.get('mood', '?')} energy={emotion.get('energy', '?')}")
+
     def _run_skill1():
         if not need_tags:
             return ("Skill1", "skipped", tags_input)
@@ -916,59 +921,42 @@ async def agent_run(request: Request):
         except Exception as e:
             return ("Skill2", "failed", str(e))
 
-    def _run_skill3(tags_for_music):
+    def _run_skill3():
         if not need_music:
             return ("Skill3", "skipped", music_input)
         try:
-            mr = recommend_music(tags_for_music[:15], text, use_api=True, fetch_urls=True)
+            # 从情绪关键词提取标签用于配乐匹配
+            emotion_tags = [f"#{kw}" for kw in emotion.get("keywords", [])]
+            mr = recommend_music(emotion_tags, text, use_api=True, fetch_urls=True, emotion=emotion)
             return ("Skill3", "completed", mr if mr else [])
         except Exception as e:
             return ("Skill3", "failed", str(e))
 
-    skill1_tags = tags_input
+    # Skill1/Skill2/Skill3 全部并行（Skill3 不再依赖 Skill1 的标签结果）
     with ThreadPoolExecutor(max_workers=3) as executor:
         f1 = executor.submit(_run_skill1)
         f2 = executor.submit(_run_skill2)
+        f3 = executor.submit(_run_skill3)
 
-        # 等 Skill1 完成 → 拿到标签 → 立即启动 Skill3（与 Skill2 并行）
-        name, status, data = f1.result()
-        if name == "Skill1" and status == "completed":
-            skill1_tags = data
-        result["execution_log"].append({
-            "skill": "标签推荐", "status": status, "timestamp": time.strftime("%H:%M:%S")
-        })
-        if status != "failed":
-            result["agent_suggestions"]["Skill1"] = data
-        else:
-            result["agent_suggestions"]["Skill1"] = []
-            result["execution_log"][-1]["error"] = str(data)
+        # 按启动顺序收集结果
+        for f, skill_name in [(f1, "标签推荐"), (f2, "图片推荐"), (f3, "配乐推荐")]:
+            try:
+                name, status, data = f.result()
+            except Exception as e:
+                name, status, data = skill_name, "failed", str(e)
+            result["execution_log"].append({
+                "skill": skill_name, "status": status, "timestamp": time.strftime("%H:%M:%S")
+            })
+            key = {"标签推荐": "Skill1", "图片推荐": "Skill2", "配乐推荐": "Skill3"}[skill_name]
+            if status == "completed":
+                result["agent_suggestions"][key] = data
+            elif status == "skipped":
+                result["agent_suggestions"][key] = data
+            else:
+                result["agent_suggestions"][key] = []
+                result["execution_log"][-1]["error"] = str(data)
 
-        # Skill3 现在可以启动（Skill1 结果已就绪）
-        f3 = executor.submit(_run_skill3, skill1_tags)
-
-        # 等 Skill2 完成
-        name, status, data = f2.result()
-        result["execution_log"].append({
-            "skill": "图片推荐", "status": status, "timestamp": time.strftime("%H:%M:%S")
-        })
-        if status != "failed":
-            result["agent_suggestions"]["Skill2"] = data
-        else:
-            result["agent_suggestions"]["Skill2"] = []
-            result["execution_log"][-1]["error"] = str(data)
-
-        # 等 Skill3 完成
-        name, status, data = f3.result()
-        result["execution_log"].append({
-            "skill": "配乐推荐", "status": status, "timestamp": time.strftime("%H:%M:%S")
-        })
-        if status != "failed":
-            result["agent_suggestions"]["Skill3"] = data
-        else:
-            result["agent_suggestions"]["Skill3"] = []
-            result["execution_log"][-1]["error"] = str(data)
-
-    print(f"[后端] Skill1/2/3 并发完成 ({time.time()-t_skills_start:.1f}s)")
+    print(f"[后端] Skill1/2/3 并行完成 ({time.time()-t_skills_start:.1f}s)")
 
     # ================================================================
     # 构建最终合并状态（新推荐优先 + 已有素材补充，去重）
@@ -1193,7 +1181,8 @@ def add_material(data: dict):
         mid = memory.add_image_material(content)
     else:
         content = data.get("music_name", data.get("original_content", ""))
-        mid = memory.add_music(content)
+        music_url = data.get("music_url", "")
+        mid = memory.add_music(content, music_url=music_url)
     return {"id": mid}
 
 
@@ -1208,6 +1197,9 @@ def update_material(material_id: int, data: dict):
     else:
         content = data.get("music_name", data.get("original_content", ""))
     success = memory.update_material(material_id, content)
+    # 如果有 music_url 则一并更新
+    if mat_type == "music" and data.get("music_url"):
+        memory.update_material_url(material_id, data["music_url"])
     return {"success": success}
 
 
@@ -1391,7 +1383,7 @@ async def upload_image(file: UploadFile = File(...)):
     # 记录到个人素材库
     try:
         tags = ["用户上传"]
-        memory.record_material(str(file_path), "image", tags)
+        memory.record_material(url, "image", tags)
     except Exception as e:
         print(f"[上传] 素材库记录失败: {e}")
     print(f"[上传] {file.filename} → {url} ({len(content)} bytes)")

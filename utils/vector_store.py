@@ -111,26 +111,30 @@ class VectorStore:
     # ==================== public_tags ====================
 
     def search_tags(self, text: str, limit: int = 20) -> List[Dict]:
-        """根据文案语义搜索最匹配的公共标签"""
+        """根据文案语义搜索最匹配的公共标签（REST API）"""
         if not self._ok:
             return []
         try:
+            import requests
             vector = embed(text)
-            results = self.client.search(
-                collection_name="public_tags",
-                query_vector=vector,
-                limit=limit,
+            resp = requests.post(
+                f"{_QDRANT_URL}/collections/public_tags/points/search",
+                json={"vector": vector, "limit": limit, "with_payload": True},
+                timeout=5,
             )
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
             return [
                 {
-                    "tag": r.payload.get("tag", ""),
-                    "category": r.payload.get("category", ""),
-                    "usage_count": r.payload.get("usage_count", 0),
-                    "avg_engagement": r.payload.get("avg_engagement", 0.0),
-                    "trending_score": r.payload.get("trending_score", 0.0),
-                    "similarity": round(r.score, 4),
+                    "tag": r["payload"].get("tag", ""),
+                    "category": r["payload"].get("category", ""),
+                    "usage_count": r["payload"].get("usage_count", 0),
+                    "avg_engagement": r["payload"].get("avg_engagement", 0.0),
+                    "trending_score": r["payload"].get("trending_score", 0.0),
+                    "similarity": round(r.get("score", 0), 4),
                 }
-                for r in results
+                for r in data.get("result", [])
             ]
         except Exception as e:
             print(f"[Qdrant] search_tags 失败: {e}")

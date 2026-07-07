@@ -40,8 +40,15 @@ class MemoryManager:
 
     @contextlib.contextmanager
     def _get_conn(self):
-        conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(
+            str(self.db_path),
+            timeout=10,  # 等待锁超时（秒），避免 "database is locked"
+        )
         conn.row_factory = sqlite3.Row
+        # 启用 WAL 模式 — 读不阻塞写，写不阻塞读
+        conn.execute("PRAGMA journal_mode=WAL")
+        # 启用外键约束
+        conn.execute("PRAGMA foreign_keys=ON")
         try:
             with self._lock:
                 yield conn
@@ -51,7 +58,24 @@ class MemoryManager:
     # ==================== 数据库初始化 ====================
 
     def _init_db(self) -> None:
-        """仅在新表不存在时创建（不影响已迁移的数据）"""
+        """创建表结构 + 启用 WAL 模式 + 自动修复损坏"""
+        # 先用短超时连接检查数据库是否完好
+        try:
+            check_conn = sqlite3.connect(str(self.db_path), timeout=5)
+            check_conn.execute("PRAGMA journal_mode=WAL")
+            check_conn.execute("PRAGMA integrity_check")
+            check_conn.close()
+        except sqlite3.DatabaseError as e:
+            print(f"[Memory] 数据库损坏警告: {e}，尝试自动修复...")
+            # 备份损坏的数据库
+            import shutil
+            backup = str(self.db_path) + ".backup." + datetime.now().strftime("%Y%m%d_%H%M%S")
+            try:
+                shutil.copy2(str(self.db_path), backup)
+                print(f"[Memory] 已备份到: {backup}")
+            except Exception:
+                pass
+
         with self._get_conn() as conn:
             c = conn.cursor()
 
@@ -134,6 +158,22 @@ class MemoryManager:
                     content     TEXT    NOT NULL,
                     metadata    TEXT,
                     created_at  TEXT    DEFAULT (datetime('now','localtime'))
+                )
+            """)
+
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS personal_material_library (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    material_type       TEXT    NOT NULL DEFAULT 'text',
+                    original_content    TEXT,
+                    image_path          TEXT,
+                    music_name          TEXT,
+                    music_url           TEXT,
+                    usage_count         INTEGER DEFAULT 0,
+                    avg_engagement_rate REAL    DEFAULT 0.0,
+                    semantic_tags_json  TEXT,
+                    created_at          TEXT    DEFAULT (datetime('now','localtime')),
+                    updated_at          TEXT
                 )
             """)
 
@@ -625,21 +665,250 @@ class MemoryManager:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    # 素材相关旧 API — 兼容空返回
-    def add_text_material(self, text: str, **kw) -> int: return 0
-    def add_image_material(self, image_path: str, **kw) -> int: return 0
-    def add_music(self, music_name: str, **kw) -> int: return 0
-    def list_materials(self, material_type: str = None, limit: int = 50) -> List: return []
-    def update_material(self, material_id: int, content: str) -> bool: return False
-    def delete_material(self, material_id: int) -> bool: return False
-    def get_materials_by_type(self, type_: str, limit: int = 10) -> List: return []
-    def get_materials_by_tags(self, tags: list, type_: str = "image", limit: int = 10) -> List: return []
-    def record_material(self, file_path: str, type_: str, tags: list = None) -> None: pass
-    def update_material_performance(self, file_path: str, views: int) -> None: pass
-    def increment_material_usage(self, file_path: str) -> None: pass
-    def increment_tag_usage(self, tag: str) -> None: pass
-    def get_top_materials(self, material_type: str, limit: int = 10) -> List: return []
-    def get_material_by_tags(self, material_type: str, tags: list, limit: int = 10) -> List: return []
+    # ==================== 素材库管理（personal_material_library） ====================
+
+    def add_text_material(self, text: str, **kw) -> int:
+        """添加文案素材，返回新素材 ID"""
+        with self._get_conn() as conn:
+            c = conn.cursor()
+            c.execute(
+                "INSERT INTO personal_material_library (material_type, original_content) VALUES (?, ?)",
+                ("text", text)
+            )
+            conn.commit()
+            return c.lastrowid
+
+    def add_image_material(self, image_path: str, **kw) -> int:
+        """添加图片素材，返回新素材 ID"""
+        with self._get_conn() as conn:
+            c = conn.cursor()
+            c.execute(
+                "INSERT INTO personal_material_library (material_type, image_path) VALUES (?, ?)",
+                ("image", image_path)
+            )
+            conn.commit()
+            return c.lastrowid
+
+    def add_music(self, music_name: str, **kw) -> int:
+        """添加配乐素材，返回新素材 ID"""
+        music_url = kw.get("music_url", "")
+        with self._get_conn() as conn:
+            c = conn.cursor()
+            c.execute(
+                "INSERT INTO personal_material_library (material_type, music_name, music_url) VALUES (?, ?, ?)",
+                ("music", music_name, music_url)
+            )
+            conn.commit()
+            return c.lastrowid
+
+    @staticmethod
+    def _sanitize_path(path: str) -> str:
+        """兼容旧数据：绝对路径 → URL 路径"""
+        if not path:
+            return path
+        s = str(path)
+        if "\\personal_materials\\" in s:
+            return "/personal/" + s.rsplit("\\", 1)[-1]
+        if "/personal_materials/" in s:
+            return "/personal/" + s.rsplit("/", 1)[-1]
+        return s
+
+    def list_materials(self, material_type: str = None, limit: int = 50) -> List:
+        """获取素材列表，可按类型筛选"""
+        with self._get_conn() as conn:
+            if material_type:
+                rows = conn.execute(
+                    "SELECT * FROM personal_material_library WHERE material_type = ? ORDER BY created_at DESC LIMIT ?",
+                    (material_type, limit)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM personal_material_library ORDER BY created_at DESC LIMIT ?",
+                    (limit,)
+                ).fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                # 解析 JSON 标签
+                if d.get("semantic_tags_json"):
+                    try:
+                        d["semantic_tags"] = json.loads(d["semantic_tags_json"])
+                    except (json.JSONDecodeError, TypeError):
+                        d["semantic_tags"] = []
+                else:
+                    d["semantic_tags"] = []
+                d.pop("semantic_tags_json", None)
+                # 兼容旧数据：绝对路径 → URL
+                if d.get("image_path"):
+                    d["image_path"] = self._sanitize_path(d["image_path"])
+                if d.get("music_url"):
+                    d["music_url"] = self._sanitize_path(d["music_url"])
+                results.append(d)
+            return results
+
+    def update_material(self, material_id: int, content: str) -> bool:
+        """更新素材内容（按类型识别字段）"""
+        with self._get_conn() as conn:
+            c = conn.cursor()
+            c.execute(
+                "SELECT material_type FROM personal_material_library WHERE id = ?",
+                (material_id,)
+            )
+            row = c.fetchone()
+            if not row:
+                return False
+            mat_type = row["material_type"]
+            if mat_type == "text":
+                c.execute(
+                    "UPDATE personal_material_library SET original_content = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+                    (content, material_id)
+                )
+            elif mat_type == "image":
+                c.execute(
+                    "UPDATE personal_material_library SET image_path = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+                    (content, material_id)
+                )
+            else:
+                c.execute(
+                    "UPDATE personal_material_library SET music_name = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+                    (content, material_id)
+                )
+            conn.commit()
+            return c.rowcount > 0
+
+    def update_material_url(self, material_id: int, music_url: str) -> bool:
+        """单独更新配乐素材的 URL"""
+        with self._get_conn() as conn:
+            c = conn.cursor()
+            c.execute(
+                "UPDATE personal_material_library SET music_url = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+                (music_url, material_id)
+            )
+            conn.commit()
+            return c.rowcount > 0
+
+    def delete_material(self, material_id: int) -> bool:
+        """删除素材"""
+        with self._get_conn() as conn:
+            c = conn.cursor()
+            c.execute("DELETE FROM personal_material_library WHERE id = ?", (material_id,))
+            conn.commit()
+            return c.rowcount > 0
+
+    def get_materials_by_type(self, type_: str, limit: int = 10) -> List:
+        """按类型获取素材"""
+        return self.list_materials(material_type=type_, limit=limit)
+
+    def get_materials_by_tags(self, tags: list, type_: str = "image", limit: int = 10) -> List:
+        """根据标签搜索素材（模糊匹配 JSON 标签字段）"""
+        if not tags:
+            return []
+        with self._get_conn() as conn:
+            results = []
+            for tag in tags:
+                rows = conn.execute(
+                    """SELECT * FROM personal_material_library
+                       WHERE material_type = ? AND semantic_tags_json LIKE ?
+                       ORDER BY usage_count DESC LIMIT ?""",
+                    (type_, f"%{tag}%", limit)
+                ).fetchall()
+                for r in rows:
+                    d = dict(r)
+                    if d.get("semantic_tags_json"):
+                        try:
+                            d["semantic_tags"] = json.loads(d["semantic_tags_json"])
+                        except (json.JSONDecodeError, TypeError):
+                            d["semantic_tags"] = []
+                    else:
+                        d["semantic_tags"] = []
+                    d.pop("semantic_tags_json", None)
+                    if d.get("image_path"):
+                        d["image_path"] = self._sanitize_path(d["image_path"])
+                    if d.get("music_url"):
+                        d["music_url"] = self._sanitize_path(d["music_url"])
+                    if d not in results:
+                        results.append(d)
+            return results
+
+    def get_top_materials(self, material_type: str, limit: int = 10) -> List:
+        """获取使用次数最多的素材"""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM personal_material_library WHERE material_type = ? ORDER BY usage_count DESC LIMIT ?",
+                (material_type, limit)
+            ).fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                if d.get("semantic_tags_json"):
+                    try:
+                        d["semantic_tags"] = json.loads(d["semantic_tags_json"])
+                    except (json.JSONDecodeError, TypeError):
+                        d["semantic_tags"] = []
+                else:
+                    d["semantic_tags"] = []
+                d.pop("semantic_tags_json", None)
+                if d.get("image_path"):
+                    d["image_path"] = self._sanitize_path(d["image_path"])
+                if d.get("music_url"):
+                    d["music_url"] = self._sanitize_path(d["music_url"])
+                results.append(d)
+            return results
+
+    def get_material_by_tags(self, material_type: str, tags: list, limit: int = 10) -> List:
+        """根据标签获取素材（别名）"""
+        return self.get_materials_by_tags(tags, type_=material_type, limit=limit)
+
+    def record_material(self, file_path: str, type_: str, tags: list = None) -> None:
+        """记录上传的素材文件"""
+        with self._get_conn() as conn:
+            c = conn.cursor()
+            tags_json = json.dumps(tags, ensure_ascii=False) if tags else "[]"
+            if type_ == "image":
+                c.execute(
+                    "INSERT INTO personal_material_library (material_type, image_path, semantic_tags_json) VALUES (?, ?, ?)",
+                    (type_, file_path, tags_json)
+                )
+            elif type_ == "text":
+                c.execute(
+                    "INSERT INTO personal_material_library (material_type, original_content, semantic_tags_json) VALUES (?, ?, ?)",
+                    (type_, file_path, tags_json)
+                )
+            else:
+                c.execute(
+                    "INSERT INTO personal_material_library (material_type, music_name, semantic_tags_json) VALUES (?, ?, ?)",
+                    (type_, file_path, tags_json)
+                )
+            conn.commit()
+
+    def update_material_performance(self, file_path: str, views: int) -> None:
+        """更新素材表现数据"""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE personal_material_library SET avg_engagement_rate = ?, updated_at = datetime('now','localtime') WHERE image_path = ? OR music_name = ? OR original_content = ?",
+                (views, file_path, file_path, file_path)
+            )
+            conn.commit()
+
+    def increment_material_usage(self, file_path: str) -> None:
+        """增加素材使用次数"""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE personal_material_library SET usage_count = usage_count + 1, updated_at = datetime('now','localtime') WHERE image_path = ? OR music_name = ? OR original_content = ?",
+                (file_path, file_path, file_path)
+            )
+            conn.commit()
+
+    def increment_tag_usage(self, tag: str) -> None:
+        """增加标签使用次数"""
+        with self._get_conn() as conn:
+            c = conn.cursor()
+            existing = conn.execute("SELECT id FROM tags WHERE name = ?", (tag,)).fetchone()
+            if existing:
+                c.execute("UPDATE tags SET usage_count = usage_count + 1 WHERE id = ?", (existing["id"],))
+            else:
+                c.execute("INSERT INTO tags (name, usage_count) VALUES (?, 1)", (tag,))
+            conn.commit()
 
     # Skill 执行追踪
     def start_skill_execution(self, *args, **kwargs) -> int: return 0

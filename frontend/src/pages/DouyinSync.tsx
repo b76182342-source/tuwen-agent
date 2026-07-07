@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Card, Button, Space, Tag, message, Table, Modal, Form,
   InputNumber, Input, DatePicker, Descriptions, Statistic, Row, Col,
@@ -13,6 +13,7 @@ import {
 import dayjs from 'dayjs';
 import { publishApi, douyinSyncApi } from '@/services/api';
 import type { PublishHistory, DouyinSyncRecord, HealthCheckResult } from '@/types';
+import { usePresetCardStagger } from '@/hooks/useAnimations';
 
 interface LocalRecord extends DouyinSyncRecord {
   key?: number;
@@ -28,11 +29,15 @@ const DouyinSync: React.FC = () => {
   const [history, setHistory] = useState<PublishHistory[]>([]);
   const [showExtensionGuide, setShowExtensionGuide] = useState(false);
   const [autoSync, setAutoSync] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     checkHealth();
     loadHistory();
   }, []);
+
+  // GSAP: 卡片交错入场
+  usePresetCardStagger(containerRef, 'sync-card', 'sync');
 
   const checkHealth = async () => {
     setChecking(true);
@@ -129,7 +134,7 @@ const DouyinSync: React.FC = () => {
       <span><HeartOutlined style={{ color: '#ff4d4f' }} /> {v}</span>
     )},
     { title: '评论', dataIndex: 'comments', width: 80, render: (v: number) => (
-      <span><MessageOutlined style={{ color: '#1890ff' }} /> {v}</span>
+      <span><MessageOutlined style={{ color: '#2563eb' }} /> {v}</span>
     )},
     { title: '播放', dataIndex: 'views', width: 80, render: (v: number) => (
       <span><EyeOutlined style={{ color: '#52c41a' }} /> {v}</span>
@@ -164,10 +169,10 @@ const DouyinSync: React.FC = () => {
   ];
 
   return (
-    <div>
+    <div ref={containerRef}>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={12}>
-          <Card title={<Space><CheckCircleOutlined />系统状态</Space>}
+          <Card className="sync-card" title={<Space><CheckCircleOutlined />系统状态</Space>}
             extra={<Button loading={checking} onClick={checkHealth}>刷新</Button>}>
             {healthStatus ? (
               <Descriptions column={2} size="small">
@@ -221,7 +226,7 @@ const DouyinSync: React.FC = () => {
         </Col>
 
         <Col span={12}>
-          <Card title="数据概览">
+          <Card className="sync-card" title="数据概览">
             <Row gutter={16}>
               <Col span={6}>
                 <Statistic title="待同步" value={records.length} suffix="条" />
@@ -257,14 +262,14 @@ const DouyinSync: React.FC = () => {
         </Col>
       </Row>
 
-      <Card title="待同步记录" extra={
+      <Card className="sync-card" title="待同步记录" extra={
         <Button icon={<PlusOutlined />} onClick={handleAddRecord}>添加记录</Button>
       }>
         <Table columns={columns} dataSource={records} rowKey="key"
           pagination={false} locale={{ emptyText: '暂无记录。点击"手动录入"添加，或安装浏览器扩展自动提取。' }} />
       </Card>
 
-      <Card title="已导入记录" extra={
+      <Card className="sync-card" title="已导入记录" extra={
         <Badge count={history.filter((h) => h.source === 'extension').length} offset={[0, 10]}>
           <span>扩展导入 {history.filter((h) => h.source === 'extension').length} 条</span>
         </Badge>
