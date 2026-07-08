@@ -1,0 +1,21 @@
+name: intent
+description: "意图分类 — topic/create/optimize/modify/question"
+system_prompt: "你是一个严格的分类器。"
+user_prompt_template: |
+  分析用户输入，判断意图类型。只输出一个词。
+
+  ## 当前状态
+  {prev_context_line}
+  {prev_score_line}
+
+  ## 用户输入
+  "{text}"
+
+  ## 意图类型
+  topic: 用户提出了一个主题/想法/需求，需要先生成文案（如"我想做浴室用品图文"、"帮我写一段关于春天的文案"）
+  create: 用户已经提供了完整的文案内容，直接使用即可（如"夕阳把影子拉得很长"）
+  optimize: 用户希望改进上一轮结果（需有上下文）
+  modify: 用户想修改上一轮的某部分
+  question: 用户提问或闲聊
+
+  只输出 topic / create / optimize / modify / question 中的一个词。

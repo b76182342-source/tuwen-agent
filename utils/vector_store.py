@@ -117,24 +117,21 @@ class VectorStore:
         try:
             import requests
             vector = embed(text)
-            resp = requests.post(
-                f"{_QDRANT_URL}/collections/public_tags/points/search",
-                json={"vector": vector, "limit": limit, "with_payload": True},
-                timeout=5,
-            )
-            if resp.status_code != 200:
-                return []
-            data = resp.json()
+            results = self.client.query_points(
+                collection_name="public_tags",
+                query=vector,
+                limit=limit,
+            ).points
             return [
                 {
-                    "tag": r["payload"].get("tag", ""),
-                    "category": r["payload"].get("category", ""),
-                    "usage_count": r["payload"].get("usage_count", 0),
-                    "avg_engagement": r["payload"].get("avg_engagement", 0.0),
-                    "trending_score": r["payload"].get("trending_score", 0.0),
-                    "similarity": round(r.get("score", 0), 4),
+                    "tag": r.payload.get("tag", ""),
+                    "category": r.payload.get("category", ""),
+                    "usage_count": r.payload.get("usage_count", 0),
+                    "avg_engagement": r.payload.get("avg_engagement", 0.0),
+                    "trending_score": r.payload.get("trending_score", 0.0),
+                    "similarity": round(r.score, 4),
                 }
-                for r in data.get("result", [])
+                for r in results
             ]
         except Exception as e:
             print(f"[Qdrant] search_tags 失败: {e}")
@@ -175,11 +172,11 @@ class VectorStore:
             return []
         try:
             vector = embed(text)
-            results = self.client.search(
+            results = self.client.query_points(
                 collection_name="public_texts",
-                query_vector=vector,
+                query=vector,
                 limit=limit,
-            )
+            ).points
             return [
                 {
                     "text": r.payload.get("text", ""),
@@ -235,11 +232,11 @@ class VectorStore:
             return []
         try:
             vector = embed(text)
-            results = self.client.search(
+            results = self.client.query_points(
                 collection_name="public_images",
-                query_vector=vector,
+                query=vector,
                 limit=limit,
-            )
+            ).points
             return [
                 {
                     "url": r.payload.get("url", ""),

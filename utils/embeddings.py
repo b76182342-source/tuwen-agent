@@ -73,20 +73,33 @@ def _get_model():
         if _model is not None:
             return _model
         _configure_hf()
-        try:
-            import os as _os
-            # 优先使用本地已下载的模型
-            if _os.path.exists(_MODEL_LOCAL_PATH):
+        import os as _os
+        # 优先使用本地已下载的模型
+        if _os.path.exists(_MODEL_LOCAL_PATH):
+            try:
                 _model = SentenceTransformer(_MODEL_LOCAL_PATH, device=_DEVICE)
                 print(f"[Embedding] 模型从本地加载: {_MODEL_LOCAL_PATH} (device={_DEVICE})")
-            else:
-                _model = SentenceTransformer(_MODEL_NAME, device=_DEVICE, cache_folder=_HF_HOME)
-                print(f"[Embedding] 模型 {_MODEL_NAME} 加载完成 (device={_DEVICE})")
-        except Exception as e:
-            print(f"[Embedding] 模型加载失败 (降级运行，Qdrant 语义搜索暂时不可用)")
-            print(f"            错误: {e}")
-            print(f"            手动下载: pip install -U huggingface_hub && huggingface-cli download {_MODEL_NAME}")
-            _model = False
+                return _model
+            except Exception as e:
+                print(f"[Embedding] 本地模型加载失败: {e}，回退在线模式")
+        # 在线模式（通过 HF 镜像），失败则离线模式降级
+        try:
+            _model = SentenceTransformer(_MODEL_NAME, device=_DEVICE, cache_folder=_HF_HOME)
+            print(f"[Embedding] 模型 {_MODEL_NAME} 加载完成 (device={_DEVICE})")
+        except Exception as e1:
+            print(f"[Embedding] 在线加载失败: {e1}")
+            print(f"[Embedding] 尝试离线模式 (local_files_only=True)...")
+            try:
+                _model = SentenceTransformer(
+                    _MODEL_NAME, device=_DEVICE,
+                    cache_folder=_HF_HOME, local_files_only=True
+                )
+                print(f"[Embedding] 模型从离线缓存加载成功 (device={_DEVICE})")
+            except Exception as e2:
+                print(f"[Embedding] 离线加载也失败 (降级运行，Qdrant 语义搜索暂时不可用)")
+                print(f"            离线错误: {e2}")
+                print(f"            手动下载: pip install -U huggingface_hub && huggingface-cli download {_MODEL_NAME}")
+                _model = False
     return _model if _model is not False else None
 
 

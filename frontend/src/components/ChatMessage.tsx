@@ -2,28 +2,14 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Image, Row, Col, message } from 'antd';
 import { PlayCircleOutlined, PauseCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useGSAP, gsap, animateMessageBubble, animateCrossfade, animateExpand } from '@/hooks/useAnimations';
+import type { ChatMessageData } from '@/types';
 
 /* ============================================================
    ChatMessage — 极简 · 紧凑 · 亲和
    三原则：去色块、高密度、暖灰调
    ============================================================ */
 
-export interface ChatMessageData {
-  role: 'user' | 'agent';
-  skill?: 'tags' | 'images' | 'music' | 'evaluation' | 'text';
-  content: string;
-  images?: { url?: string; path?: string }[];
-  tags?: string[];
-  musicList?: { name: string; artist?: string; style?: string; reason?: string; preview_url?: string | null; can_preview?: boolean }[];
-  score?: number;
-  level?: string;
-  suggestions?: string[];
-  showcase?: {
-    text: string; tags: string[]; images: { url: string; desc: string }[];
-    music: { name: string; artist: string; style: string; preview_url?: string | null; can_preview?: boolean }[];
-    score: number; tip: string;
-  };
-}
+export type { ChatMessageData };
 
 // ============================================================
 // 音频试听 — 30s 轻量内联

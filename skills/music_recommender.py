@@ -14,9 +14,10 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from utils.config import (
-    PROXY, call_deepseek_json, get_deepseek_api_key,
+    PROXY, get_chat_model, get_deepseek_api_key,
     get_douyin_client_key, get_douyin_client_secret,
 )
+from backend.schemas import MusicSearchKeywords, MusicMatchList
 
 # 抖音 token 缓存
 _douyin_token_cache = {"token": None, "expires_at": 0}
@@ -239,30 +240,23 @@ def _generate_search_keywords(tags: List[str], text: str = "") -> List[Dict[str,
 文案：{text}
 
 要求：
-1. 输出必须是严格的 JSON 数组，每个元素包含 keyword、style、mood 三个字段
-2. keyword 是适合在华语音乐平台搜索的中文短语（如 "民谣 怀旧"、"轻快 可爱"、"励志 摇滚"）
-3. style 是音乐风格描述（如 "民谣/怀旧"、"欢快/卡点"、"激昂/摇滚"）
-4. mood 是情绪描述（如 "安静、深沉"、"轻松、治愈"、"热血、励志"）
-5. 不要输出任何其他内容，只输出 JSON 数组
+1. keyword 是适合在华语音乐平台搜索的中文短语（如 "民谣 怀旧"、"轻快 可爱"、"励志 摇滚"）
+2. style 是音乐风格描述（如 "民谣/怀旧"、"欢快/卡点"、"激昂/摇滚"）
+3. mood 是情绪描述（如 "安静、深沉"、"轻松、治愈"、"热血、励志"）"""
 
-示例输出：
-[{{"keyword": "民谣 怀旧", "style": "民谣/怀旧", "mood": "安静、深沉"}}, {{"keyword": "轻快 可爱", "style": "欢快/卡点", "mood": "轻松、治愈"}}, {{"keyword": "励志 摇滚", "style": "激昂/摇滚", "mood": "热血、励志"}}]"""
-
-    result = call_deepseek_json(
-        system_prompt="你是一个严格的 JSON 输出器，只输出 JSON，不输出其他内容。",
-        user_prompt=prompt,
-        temperature=0.7,
-        max_tokens=500,
-    )
-
-    if isinstance(result, list) and all(
-        isinstance(k, dict) and "keyword" in k and "style" in k and "mood" in k
-        for k in result
-    ):
-        print(f"[搜索词] DeepSeek 生成 {len(result)} 个搜索关键词: {[k['keyword'] for k in result]}")
-        return result[:3]
-    elif result is not None:
-        print("[搜索词] 返回格式不正确")
+    try:
+        llm = get_chat_model(temperature=0.7, max_tokens=500)
+        structured = llm.with_structured_output(MusicSearchKeywords, method="function_calling")
+        result = structured.invoke([
+            {"role": "system", "content": "你是一个严格的音乐搜索关键词生成器。"},
+            {"role": "user", "content": prompt},
+        ])
+        if isinstance(result, MusicSearchKeywords):
+            converted = [{"keyword": k.keyword, "style": k.style, "mood": k.mood} for k in result.keywords]
+            print(f"[搜索词] DeepSeek 生成 {len(converted)} 个搜索关键词: {[k['keyword'] for k in converted]}")
+            return converted[:3]
+    except Exception as e:
+        print(f"[搜索词] DeepSeek 失败: {e}")
     return []
 
 
@@ -619,25 +613,23 @@ def _recommend_via_douyin(
 
 ## 要求
 1. 从以上候选歌曲中挑选 5 首最匹配用户内容的
-2. 每首给出：selected_index（候选序号数字）、style（风格）、mood（情绪）、reason（推荐理由，20字以内）
-3. 输出格式必须是严格的 JSON 数组
-4. 不要输出任何其他内容
+2. 每首给出：selected_index（候选序号数字）、style（风格）、mood（情绪）、reason（推荐理由，20字以内）"""
 
-示例输出：
-[{{"selected_index": 3, "style": "民谣/治愈", "mood": "安静、温暖", "reason": "民谣曲风匹配文案的慢生活主题"}}]"""
+    try:
+        llm = get_chat_model(temperature=0.7, max_tokens=600, timeout=20)
+        structured = llm.with_structured_output(MusicMatchList, method="function_calling")
+        result = structured.invoke([
+            {"role": "system", "content": "你是一个严格的配乐匹配器。"},
+            {"role": "user", "content": prompt},
+        ])
+    except Exception as e:
+        print(f"[抖音] DeepSeek 匹配失败: {e}")
+        result = None
 
-    matches = call_deepseek_json(
-        system_prompt="你是一个严格的 JSON 输出器，只输出 JSON，不输出其他内容。",
-        user_prompt=prompt,
-        temperature=0.7,
-        max_tokens=600,
-        timeout=20,
-    )
-
-    if isinstance(matches, list) and all("selected_index" in m for m in matches):
+    if isinstance(result, MusicMatchList):
         results = []
-        for m in matches[:5]:
-            idx = m["selected_index"] - 1
+        for m in result.matches[:5]:
+            idx = m.selected_index - 1
             if 0 <= idx < len(all_songs):
                 song = all_songs[idx]
                 results.append({
@@ -647,9 +639,9 @@ def _recommend_via_douyin(
                     "share_url": song.get("share_url", ""),
                     "song_id": song["song_id"],
                     "platform": "douyin",
-                    "style": m.get("style", "热门"),
-                    "mood": m.get("mood", "流行"),
-                    "reason": m.get("reason", "抖音热歌榜匹配"),
+                    "style": m.style,
+                    "mood": m.mood,
+                    "reason": m.reason,
                     "source": "抖音曲库",
                     "url": None
                 })

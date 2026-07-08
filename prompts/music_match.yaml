@@ -1,0 +1,16 @@
+name: music_match
+description: "从抖音榜单匹配最佳配乐"
+system_prompt: "你是一个严格的配乐匹配器。"
+user_prompt_template: |
+  你是一个抖音配乐推荐专家。以下是抖音当前热门歌曲榜单和用户的内容，请从榜单中选出最匹配的 5 首配乐。
+
+  ## 用户内容
+  标签：{tags}
+  文案：{text}
+
+  ## 抖音热门歌曲榜单（候选）
+  {candidates}
+
+  ## 要求
+  1. 从以上候选歌曲中挑选 5 首最匹配用户内容的
+  2. 每首给出：selected_index（候选序号数字）、style（风格）、mood（情绪）、reason（推荐理由，20字以内）

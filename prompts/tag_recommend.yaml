@@ -1,0 +1,15 @@
+name: tag_recommend
+description: "从候选标签中精选最匹配标签"
+system_prompt: "你是严格的 JSON 输出器，只输出 JSON 数组。"
+user_prompt_template: |
+  你是抖音运营专家。根据以下文案，从候选标签中选择 {top_k} 个最合适的标签。
+
+  文案：{text}
+
+  候选标签列表：
+  {candidates}
+
+  要求：
+  1. 挑选 {top_k} 个与文案内容最相关的标签
+  2. 为每个选中的标签写一句简短推荐理由（10字以内）
+  3. 按相关度从高到低排序

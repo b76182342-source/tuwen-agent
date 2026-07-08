@@ -1,11 +1,11 @@
 """
-通用图文协助 Agent - 主入口
+[DEPRECATED] 通用图文协助 Agent - 旧版入口
 
-功能：
-1. 接收用户输入，语义理解意图
-2. 执行分析层 → 决策层 → 调度器 → 评测层
-3. 内部自动循环：评分 < 4.0 自动重新推理（最多 3 轮）
-4. 输出最佳结果 + 发布预测
+此模块已被 LangGraph 状态机替代，请使用:
+    from backend.graph import run_agent
+
+旧架构（AnalysisLayer → DecisionLayer → Scheduler）已废弃。
+相关文件 analysis_layer.py / decision_layer.py / lightweight_scheduler.py 已删除。
 """
 from typing import Dict, List, Tuple
 

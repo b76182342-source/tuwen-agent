@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Input, Button, Upload, Spin, message, Image, Checkbox, Popconfirm } from 'antd';
 import { SendOutlined, PlusOutlined, DeleteOutlined, LoadingOutlined, ReloadOutlined, MessageOutlined, CheckSquareOutlined } from '@ant-design/icons';
-import ChatMessage, { type ChatMessageData } from '@/components/ChatMessage';
+import ChatMessage from '@/components/ChatMessage';
+import type { ChatMessageData } from '@/types';
 import ExecutionFlow from '@/components/ExecutionFlow';
 import { useAppStore, saveMessagesToCache, loadMessagesFromCache } from '@/stores/appStore';
 import type { UploadFile } from 'antd/es/upload/interface';
@@ -22,11 +23,18 @@ const generateConversationSummary = (content: string): string => {
 };
 
 const Workspace: React.FC = () => {
-  const [messages, setMessages] = useState<ChatMessageData[]>([]);
-  const [inputText, setInputText] = useState('');
+  // —— 从 Zustand store 获取跨页面持久化状态 ——
+  const {
+    conversationId, setConversationId,
+    messages, setMessages, inputText, setInputText,
+    iteration, setIteration, incrementIteration,
+    setExecutionStages, setExecutionResult,
+    resetWorkspace,
+  } = useAppStore();
+
+  // —— 纯 UI 状态（组件卸载时丢失不影响核心体验） ——
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [sending, setSending] = useState(false);
-  const [iteration, setIteration] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [conversations, setConversations] = useState<any[]>([]);
   const [showConversationList, setShowConversationList] = useState(false);
@@ -38,10 +46,6 @@ const Workspace: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const emptyRef = useRef<HTMLDivElement>(null);
   const convPanelRef = useRef<HTMLDivElement>(null);
-  const {
-    conversationId, setConversationId,
-    setExecutionStages, setExecutionResult,
-  } = useAppStore();
 
   const convItemHover = useGSAPHover(
     { backgroundColor: '#F5F5F4', duration: 0.15, ease: 'power2.out' },
@@ -52,6 +56,7 @@ const Workspace: React.FC = () => {
     { backgroundColor: '#fff', borderColor: '#E7E5E4', color: '#78716C', duration: 0.15, ease: 'power2.out' },
   );
 
+  // —— 初始化：首次挂载时从缓存/后端恢复消息 ——
   useEffect(() => {
     initConversation();
     const republishData = localStorage.getItem('republish_data');
@@ -88,6 +93,10 @@ const Workspace: React.FC = () => {
 
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 300); }, [loaded]);
 
+  // ============================================================
+  // 对话管理
+  // ============================================================
+
   const initConversation = async () => {
     const convId = useAppStore.getState().conversationId;
     try {
@@ -105,42 +114,79 @@ const Workspace: React.FC = () => {
   };
 
   const createNewConversation = async () => {
+    resetWorkspace();
     try {
       const r = await conversationApi.create({ title: '新对话', user_id: 'default_user' });
-      setConversationId(r.data.conversation_id); setMessages([]); setIteration(0); setExecutionStages([]); setExecutionResult(null);
-      setBackendAvailable(true); message.success('新对话已创建');
+      const newId = r.data?.conversation_id;
+      if (newId) {
+        setConversationId(newId);
+      } else {
+        setConversationId('local_' + Date.now());
+      }
+      setBackendAvailable(true);
+      message.success('新对话已创建');
     } catch {
-      const localId = 'local_' + Date.now(); setConversationId(localId); setMessages([]); setBackendAvailable(false);
+      setConversationId('local_' + Date.now());
+      setBackendAvailable(false);
     }
   };
 
   const loadConversationHistory = async (convId: string) => {
-    // 先用本地缓存立即渲染，避免页面切换时内容消失
-    const cached = loadMessagesFromCache(convId);
-    if (cached.length > 0) {
-      setMessages(cached as ChatMessageData[]);
-      setIteration(Math.floor(cached.length / 2));
+    if (!convId) return;
+
+    const storeMsgs = useAppStore.getState().messages;
+
+    // 如果 store 中已有消息（来自跨页面导航前的状态保留），
+    // 不要用缓存覆盖 — 缓存可能比 store 旧
+    if (storeMsgs.length === 0) {
+      const cached = loadMessagesFromCache(convId);
+      if (cached.length > 0) {
+        setMessages(cached as ChatMessageData[]);
+        setIteration(Math.floor(cached.length / 2));
+      }
     }
-    // 再从后端同步最新数据
+
+    // 从后端同步数据，但绝不覆盖 store 中更多的消息
+    // （防止 Agent 还在执行中时后端返回不完整数据覆盖 store）
     try {
       const r = await conversationApi.getHistory(convId);
       const msgs = r.data.map((msg: any) => {
         const m = msg.metadata ? JSON.parse(msg.metadata) : {};
         return { role: msg.role, content: msg.content, tags: m.tags || [], images: m.images || [], musicList: m.music || [], score: m.evaluation_score, level: m.evaluation_level, suggestions: m.agent_suggestions || [] } as ChatMessageData;
       });
-      // 以后端数据为准（如果后端有更新的数据）
-      if (msgs.length >= cached.length) {
-        setMessages(msgs); setIteration(Math.floor(msgs.length / 2));
+      // 关键：只在后端数据 >= store 当前数据时才覆盖
+      // 避免 Agent 还在生成结果时，后端返回旧数据冲掉 store 中已有的更新数据
+      const currentMsgs = useAppStore.getState().messages;
+      if (msgs.length >= currentMsgs.length) {
+        setMessages(msgs);
+        setIteration(Math.floor(msgs.length / 2));
+        saveMessagesToCache(convId, msgs as any);
       }
-      if (msgs.length > 0) saveMessagesToCache(convId, msgs as any);
     } catch {
-      // 后端不可用时，已显示的缓存数据就是最新
-      if (cached.length === 0) message.warning('后端未连接，请检查服务是否启动');
+      // 后端不可用：store 或缓存中已有数据就是最新的
+      const currentMsgs = useAppStore.getState().messages;
+      if (currentMsgs.length === 0) {
+        const cached = loadMessagesFromCache(convId);
+        if (cached.length > 0) {
+          setMessages(cached as ChatMessageData[]);
+        } else {
+          message.warning('后端未连接，请检查服务是否启动');
+        }
+      }
     }
   };
 
   const loadConversations = async () => { try { const r = await conversationApi.list({ limit: 20 }); setConversations(r.data); } catch {} };
-  const switchConversation = async (id: string) => { setConversationId(id); setShowConversationList(false); setMultiSelectMode(false); setSelectedConversations(new Set()); await loadConversationHistory(id); message.success('已切换对话'); };
+  const switchConversation = async (id: string) => {
+    if (!id) return;
+    setConversationId(id);
+    resetWorkspace(); // 先清空旧对话状态，避免闪现旧内容
+    setShowConversationList(false);
+    setMultiSelectMode(false);
+    setSelectedConversations(new Set());
+    await loadConversationHistory(id);
+    message.success('已切换对话');
+  };
   const deleteConversation = async (id: string) => {
     if (!confirm('确定要删除这个对话吗？')) return;
     try { await conversationApi.delete(id); if (id === conversationId) await createNewConversation(); await loadConversations(); message.success('对话已删除'); }
@@ -170,20 +216,37 @@ const Workspace: React.FC = () => {
     else setSelectedConversations(new Set(conversations.map(c => c.conversation_id)));
   };
   const updateConversationTitle = async (convId: string, firstUserMessage: string) => {
+    if (!convId) return;
     const summary = generateConversationSummary(firstUserMessage);
     if (summary && summary !== '新对话') {
       try { await conversationApi.updateTitle(convId, summary); } catch {}
     }
   };
 
+  // ============================================================
+  // 发送消息 — 核心流程
+  // ============================================================
+
   const handleSend = async () => {
     const text = inputText.trim();
     if (!text && fileList.length === 0) return;
+
+    const safeConvId = conversationId || 'local_' + Date.now();
+    if (!conversationId) {
+      setConversationId(safeConvId);
+    }
+
     const originFiles = fileList.filter(f => f.originFileObj);
     const userImages = originFiles.map(f => ({ url: URL.createObjectURL(f.originFileObj!), path: f.name }));
     const userMsg: ChatMessageData = { role: 'user', content: text || '(图片素材)', images: userImages };
-    const newMsgs = [...messages, userMsg];
-    setMessages(newMsgs); setInputText(''); setSending(true);
+    const prevMessages = useAppStore.getState().messages;
+    const newMsgs = [...prevMessages, userMsg];
+
+    // ✅ 关键修复：立即写入 store（自动同步缓存），确保切换页面不丢失
+    setMessages(newMsgs);
+    setInputText('');
+    setSending(true);
+
     const now = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     setExecutionStages([
       { name: '标签推荐', status: 'pending', start_time: now } as ExecutionStage,
@@ -191,7 +254,10 @@ const Workspace: React.FC = () => {
       { name: '配乐推荐', status: 'pending', start_time: now } as ExecutionStage,
       { name: '内容评估', status: 'pending', start_time: now } as ExecutionStage,
     ]);
-    setMessages([...newMsgs, { role: 'agent', skill: 'text', content: '思考中...' }]);
+
+    // 添加"思考中"占位 — 也要写入 store
+    const msgsWithPlaceholder = [...newMsgs, { role: 'agent' as const, skill: 'text' as const, content: '思考中...' }];
+    setMessages(msgsWithPlaceholder);
 
     try {
       let uploadedUrls: { url: string; path: string }[] = [];
@@ -206,26 +272,34 @@ const Workspace: React.FC = () => {
         uploadedUrls = await Promise.all(uploadPromises);
       }
 
-      const r = await agentApi.run({ text, tags: [], images: uploadedUrls, music: [], enable_blackbox: false, conversation_id: conversationId });
-      const result: any = r.data; const agentMsgs: ChatMessageData[] = [];
+      const r = await agentApi.run({ text, tags: [], images: uploadedUrls, music: [], enable_blackbox: false, conversation_id: safeConvId });
+      const result: any = r.data;
+      const agentMsgs: ChatMessageData[] = [];
+
       if (result.execution_log?.length) {
         const m: Record<string, SkillStatus> = { completed: 'completed', running: 'running', failed: 'failed', pending: 'pending' };
         setExecutionStages(result.execution_log.map((l: any) => ({ name: l.skill || l.name, status: (m[l.status] || 'completed') as SkillStatus, start_time: l.start_time || l.timestamp || now, end_time: l.end_time || (l.status === 'completed' ? new Date().toLocaleTimeString('zh-CN', { hour12: false }) : undefined) })));
       }
       setExecutionResult(result);
+
       if (result.agent_suggestions?.Skill1?.length) agentMsgs.push({ role: 'agent', skill: 'tags', content: '标签推荐', tags: result.agent_suggestions.Skill1 });
       if (result.agent_suggestions?.Skill2?.length) agentMsgs.push({ role: 'agent', skill: 'images', content: '图片推荐', images: result.agent_suggestions.Skill2.map((img: any) => ({ url: img.original_url, path: img.local_path || img.description })) });
       if (result.agent_suggestions?.Skill3?.length) agentMsgs.push({ role: 'agent', skill: 'music', content: '配乐推荐', musicList: result.agent_suggestions.Skill3.map((m: any) => ({ name: m.name, artist: m.artist, style: m.style, reason: m.reason })) });
       if (result.evaluation) { const ev = result.evaluation; agentMsgs.push({ role: 'agent', skill: 'evaluation', content: '内容评估', score: ev.score, level: ev.level, suggestions: ev.suggestions, showcase: ev.showcase }); }
+
       const finalMsgs = [...newMsgs, ...agentMsgs];
-      setMessages(finalMsgs); setIteration(p => p + 1);
-      saveMessagesToCache(conversationId, finalMsgs as any);
-      if (messages.length === 0 && text) updateConversationTitle(conversationId, text);
+      setMessages(finalMsgs);
+      incrementIteration();
+
+      // 更新对话标题（仅首条消息）
+      if (prevMessages.length === 0 && text) {
+        updateConversationTitle(safeConvId, text);
+      }
       await loadConversations();
     } catch (e: any) {
       const err = e?.response?.data?.detail || e?.message || '未知错误';
-      setMessages([...newMsgs, { role: 'agent', skill: 'text', content: `请求失败: ${err}` }]);
-      saveMessagesToCache(conversationId, [...newMsgs, { role: 'agent', skill: 'text', content: `请求失败: ${err}` }] as any);
+      const errFinal = [...newMsgs, { role: 'agent' as const, skill: 'text' as const, content: `请求失败: ${err}` }];
+      setMessages(errFinal);
       message.error(`请求失败: ${err}`);
       setExecutionStages([
         { name: '标签推荐', status: 'failed' as SkillStatus, start_time: now, end_time: new Date().toLocaleTimeString('zh-CN', { hour12: false }) } as ExecutionStage,
@@ -260,7 +334,7 @@ const Workspace: React.FC = () => {
             <MessageOutlined style={{ fontSize:14 }} /> 对话列表
           </span>
           <span style={{ color:'#D6D3D1',fontSize:13 }}>·</span>
-          <span style={{ fontSize:12,color:'#A8A29E' }}>{conversationId?.slice(-8)} · 第 {iteration} 轮</span>
+          <span style={{ fontSize:12,color:'#A8A29E' }}>{conversationId?.slice(-8) || '----'} · 第 {iteration} 轮</span>
         </div>
         <span onClick={createNewConversation} style={{ fontSize:13,color:'#78716C',cursor:'pointer',padding:'4px 0' }}>
           <ReloadOutlined style={{ marginRight:4 }} />新对话

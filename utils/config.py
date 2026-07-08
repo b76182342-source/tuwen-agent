@@ -225,7 +225,34 @@ def is_safe_url(url: str) -> bool:
 
 
 # ============================================================================
-# DeepSeek API 共享调用 helper
+# LangChain ChatOpenAI 工厂 — 结构化输出（替代 call_deepseek/call_deepseek_json）
+# ============================================================================
+
+from langchain_openai import ChatOpenAI  # noqa: E402
+
+
+def get_chat_model(
+    temperature: float = 0.7,
+    max_tokens: int = 500,
+    timeout: int = 15,
+) -> ChatOpenAI:
+    """返回配置好 DeepSeek 端点的 ChatOpenAI 实例
+
+    用于 with_structured_output(method="function_calling")，
+    替代旧的 call_deepseek / call_deepseek_json 字符串 prompt 模式。
+    """
+    return ChatOpenAI(
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com/v1",
+        api_key=get_deepseek_api_key(),
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+    )
+
+
+# ============================================================================
+# DeepSeek API 共享调用 helper（deprecated — 逐步迁移到 get_chat_model）
 # ============================================================================
 
 def call_deepseek(

@@ -12,11 +12,12 @@ from typing import List, Dict, Optional
 from datetime import datetime
 
 from utils.config import (
-    PROXY, call_deepseek_json, is_safe_url,
+    PROXY, get_chat_model, is_safe_url,
     get_pexels_api_key, get_unsplash_access_key, get_deepseek_api_key,
     get_approved_images_dir, extract_keywords, KEYWORD_TRANSLATION,
 )
 from utils.vector_store import vector_store
+from backend.schemas import ImageKeywordsOutput
 
 
 # ==================== 模拟数据 ====================
@@ -109,26 +110,23 @@ def generate_search_keywords_via_api(text: str) -> List[str]:
     prompt = f"""你是一个图片搜索专家。根据以下中文文案，生成3-5个适合在图片库搜索的英文关键词。
 
 要求：
-1. 输出必须是严格的 JSON 数组，只包含英文单词或短语
-2. 每个关键词应该是简洁的英文单词（如 cat, food, travel）
-3. 不要输出任何其他内容，只输出 JSON 数组
-4. 关键词应该能准确反映文案的主题和情感
+1. 每个关键词应该是简洁的英文单词（如 cat, food, travel）
+2. 关键词应该能准确反映文案的主题和情感
 
-文案：{text}
+文案：{text}"""
 
-示例输出：
-["cat", "cute", "window", "sunlight", "cozy"]"""
-
-    result = call_deepseek_json(
-        system_prompt="你是一个严格的 JSON 输出器，只输出 JSON 数组，不输出其他内容。",
-        user_prompt=prompt,
-        temperature=0.7,
-        max_tokens=100,
-    )
-
-    if isinstance(result, list) and all(isinstance(k, str) for k in result):
-        print(f"[API] DeepSeek 生成搜索词: {result}")
-        return result[:5]
+    try:
+        llm = get_chat_model(temperature=0.7, max_tokens=100)
+        structured = llm.with_structured_output(ImageKeywordsOutput, method="function_calling")
+        result = structured.invoke([
+            {"role": "system", "content": "你是一个严格的图片关键词生成器。"},
+            {"role": "user", "content": prompt},
+        ])
+        if isinstance(result, ImageKeywordsOutput):
+            print(f"[API] DeepSeek 生成搜索词: {result.keywords}")
+            return result.keywords[:5]
+    except Exception as e:
+        print(f"[API] DeepSeek 搜索词生成失败: {e}")
     return []
 
 

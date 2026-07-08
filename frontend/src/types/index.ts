@@ -1,3 +1,23 @@
+// ============================================================
+// 对话消息类型（全局共享，store 和组件均依赖）
+// ============================================================
+export interface ChatMessageData {
+  role: 'user' | 'agent';
+  skill?: 'tags' | 'images' | 'music' | 'evaluation' | 'text';
+  content: string;
+  images?: { url?: string; path?: string }[];
+  tags?: string[];
+  musicList?: { name: string; artist?: string; style?: string; reason?: string; preview_url?: string | null; can_preview?: boolean }[];
+  score?: number;
+  level?: string;
+  suggestions?: string[];
+  showcase?: {
+    text: string; tags: string[]; images: { url: string; desc: string }[];
+    music: { name: string; artist: string; style: string; preview_url?: string | null; can_preview?: boolean }[];
+    score: number; tip: string;
+  };
+}
+
 // 用户输入类型
 export interface UserInput {
   text: string;

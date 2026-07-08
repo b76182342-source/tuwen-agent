@@ -20,12 +20,13 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from utils.config import (
-    PROXY, call_deepseek_json, get_deepseek_api_key, PROJECT_ROOT,
+    PROXY, get_chat_model, get_deepseek_api_key, PROJECT_ROOT,
 )
 from utils.memory import MemoryManager
+from backend.schemas import EvaluationOutput
 
 try:
-    from agent.intelligent_blackbox import IntelligentBlackbox
+    from backend.graph.intelligent_blackbox import IntelligentBlackbox
 except ImportError:
     IntelligentBlackbox = None
 
@@ -326,30 +327,34 @@ def _evaluate_via_api(
 2. 标签匹配度（25%）：标签与文案语义相关性、标签数量（3-8个最佳）
 3. 素材丰富度（20%）：图片数量（≥2张加分）、图片描述与文案匹配度
 4. 音乐协调性（15%）：配乐风格与内容情绪是否匹配
-5. 结构完整性（10%）：是否具备文案+图片+标签+配乐全套
+5. 结构完整性（10%）：是否具备文案+图片+标签+配乐全套"""
 
-## 输出要求
-输出严格的 JSON 格式，包含：
-- score: 综合评分（1.0~5.0，保留1位小数）
-- level: 评级（很差/较差/一般/中等偏下/中等/中等偏上/较好/很好）
-- report: Markdown 格式的详细评估报告
-- suggestions: 优化建议列表（最多3条）
-- dimensions: 各维度评分对象
+    try:
+        llm = get_chat_model(temperature=0.3, max_tokens=1500, timeout=20)
+        structured = llm.with_structured_output(EvaluationOutput, method="function_calling")
+        result = structured.invoke([
+            {"role": "system", "content": "你是一个抖音内容质量评估专家。"},
+            {"role": "user", "content": prompt},
+        ])
+    except Exception as e:
+        print(f"[API] DeepSeek 评估失败: {e}")
+        return None
 
-示例输出：
-{{"score": 3.5, "level": "中等偏下", "report": "## 评估报告\n...", "suggestions": ["建议1", "建议2", "建议3"], "dimensions": {{"text_quality": 3.0, "tag_match": 4.0, "image_richness": 3.0, "music_harmony": 4.0, "completeness": 4.0}}}}"""
-
-    result = call_deepseek_json(
-        system_prompt="你是一个严格的 JSON 输出器，只输出 JSON，不输出其他内容。",
-        user_prompt=prompt,
-        temperature=0.3,
-        max_tokens=1500,
-        timeout=20,
-    )
-
-    if isinstance(result, dict) and "score" in result:
-        print(f"[API] DeepSeek 评估完成: {result.get('score', 'N/A')}")
-        return result
+    if isinstance(result, EvaluationOutput):
+        print(f"[API] DeepSeek 评估完成: {result.score}")
+        return {
+            "score": result.score,
+            "level": result.level,
+            "report": result.report,
+            "suggestions": result.suggestions,
+            "dimensions": {
+                "text_quality": result.dimensions.text_quality,
+                "tag_match": result.dimensions.tag_match,
+                "image_richness": result.dimensions.image_richness,
+                "music_harmony": result.dimensions.music_harmony,
+                "completeness": result.dimensions.completeness,
+            }
+        }
     return None
 
 

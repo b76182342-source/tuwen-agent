@@ -16,9 +16,10 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 from utils.memory import MemoryManager
-from utils.config import call_deepseek_json, extract_keywords, KEYWORD_PATTERNS
+from utils.config import get_chat_model, extract_keywords, KEYWORD_PATTERNS
 from utils.cache import cache as redis_cache
 from utils.vector_store import vector_store
+from backend.schemas import TagRankList, EmotionOutput
 
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "tag_rules.json"
 
@@ -103,19 +104,19 @@ def _stage3_llm_rerank(text: str, candidates: List[Dict], top_k: int = 8) -> Lis
 要求：
 1. 挑选 {top_k} 个与文案内容最相关的标签
 2. 为每个选中的标签写一句简短推荐理由（10字以内）
-3. 按相关度从高到低排序
-4. 输出格式必须是严格的 JSON 数组：[{{"tag": "#标签名", "reason": "理由"}}]
-5. 不要输出任何其他内容"""
+3. 按相关度从高到低排序"""
 
-    result = call_deepseek_json(
-        system_prompt="你是严格的 JSON 输出器，只输出 JSON 数组。",
-        user_prompt=prompt,
-        temperature=0.5,
-        max_tokens=400,
-    )
-
-    if result and isinstance(result, list):
-        return [r for r in result if isinstance(r, dict) and "tag" in r][:top_k]
+    try:
+        llm = get_chat_model(temperature=0.5, max_tokens=400)
+        structured = llm.with_structured_output(TagRankList, method="function_calling")
+        result = structured.invoke([
+            {"role": "system", "content": "你是严格的 JSON 输出器，只输出 JSON 数组。"},
+            {"role": "user", "content": prompt},
+        ])
+        if result and isinstance(result, TagRankList):
+            return [{"tag": r.tag, "reason": r.reason} for r in result.tags][:top_k]
+    except Exception as e:
+        print(f"[Stage3] LLM 重排序失败: {e}")
     return []
 
 
@@ -134,22 +135,25 @@ def analyze_emotion(text: str) -> Dict:
     if cache_key in _EMOTION_CACHE:
         return _EMOTION_CACHE[cache_key]
 
-    prompt = f"""分析以下文案的情绪和基调。返回严格的 JSON：
+    prompt = f"""分析以下文案的情绪和基调。
+
 文案：{text}
 
-格式：{{"mood": "描述情绪(如搞笑/温馨/伤感/励志/日常/吐槽)", "intensity": 0.0-1.0, "energy": "high/medium/low", "keywords": ["关键情绪词1", "关键情绪词2"]}}
-只输出 JSON，不要其他。"""
+请分析文案的情绪(mood)、强度(intensity 0.0-1.0)、能量级别(energy: high/medium/low)和关键情绪词(keywords)。"""
 
-    result = call_deepseek_json(
-        system_prompt="你是严格的 JSON 输出器。",
-        user_prompt=prompt,
-        temperature=0.3,
-        max_tokens=150,
-    )
-
-    if result and isinstance(result, dict):
-        _EMOTION_CACHE[cache_key] = result
-        return result
+    try:
+        llm = get_chat_model(temperature=0.3, max_tokens=150)
+        structured = llm.with_structured_output(EmotionOutput, method="function_calling")
+        result = structured.invoke([
+            {"role": "system", "content": "你是严格的 JSON 输出器。"},
+            {"role": "user", "content": prompt},
+        ])
+        if result and isinstance(result, EmotionOutput):
+            output = {"mood": result.mood, "intensity": result.intensity, "energy": result.energy, "keywords": result.keywords}
+            _EMOTION_CACHE[cache_key] = output
+            return output
+    except Exception as e:
+        print(f"[情绪分析] LLM 失败: {e}")
 
     # 回退：规则情绪判断
     fallback = _rule_emotion(text)

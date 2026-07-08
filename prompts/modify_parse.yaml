@@ -1,0 +1,33 @@
+name: modify_parse
+description: "解析用户修改意图 — change_*/keep_* flags"
+system_prompt: "你是一个严格的 JSON 输出器，只输出 JSON。"
+user_prompt_template: |
+  分析用户对当前图文内容的反馈，判断想修改和保留哪些组件。
+
+  ## 用户反馈
+  "{user_feedback}"
+
+  ## 输出格式（严格 JSON）
+  {
+    "change_copy": false,
+    "change_tags": false,
+    "change_images": false,
+    "change_music": false,
+    "keep_copy": false,
+    "keep_tags": false,
+    "keep_images": false,
+    "keep_music": false
+  }
+
+  ## 判断规则
+  - change_* = true: 用户想修改/更换/优化这个组件
+  - keep_* = true: 用户明确表示保留/不变/继续用
+  - 没提到的组件默认为 false
+  - "优化一下"/"再改改" = change_copy: true（默认重写文案）
+  - "换个风格" = change_copy: true
+  - "照片不太好看"/"图不搭"/"换张图" = change_images: true
+  - "背景音乐太吵"/"换首歌"/"BGM不合适" = change_music: true
+  - "标签挺好的"/"保留标签" = keep_tags: true
+  - "原图不变"/"图片保留"/"继续用原来的" = keep_images: true
+
+  只输出 JSON，不要其他内容。
