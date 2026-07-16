@@ -576,6 +576,169 @@ class MemoryManager:
             "messages": history,
         }
 
+    # ==================== DB1: 会话摘要 (Redis) ====================
+
+    def save_session_summary(self, conv_id: str, summary: dict) -> bool:
+        """更新会话摘要到 Redis（DB1 — 长期跨请求记忆）
+
+        管线或 Agent 对话结束后调用，供 initialize 节点读取。
+        摘要字段：
+          - topic: 当前主题/文案摘要
+          - last_score: 最近一次评分
+          - last_tags: 最近一次标签列表
+          - last_weak_dimension: 上轮最低分维度
+          - user_style: 用户偏好风格（从对话中提取）
+          - user_avoids: 用户明确表达的不喜欢
+          - total_rounds: 累积轮数
+          - last_evaluation: 最近评估结果（精简版）
+          - last_updated: ISO 时间戳
+        """
+        summary["last_updated"] = datetime.now().isoformat()
+        return redis_cache.set_cached("summary", conv_id, summary, ttl=30 * 86400)
+
+    def load_session_summary(self, conv_id: str) -> Optional[dict]:
+        """读取会话摘要（DB1 读 — initialize 节点调用）"""
+        return redis_cache.get_cached("summary", conv_id)
+
+    # ==================== DB2: 完整会话记录 — 消息序列化 (SQLite) ====================
+
+    @staticmethod
+    def _serialize_message(msg) -> dict:
+        """将单个 LangChain Message 转为 SQLite 行 dict"""
+        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+
+        base = {"content": getattr(msg, "content", "") or ""}
+
+        if isinstance(msg, HumanMessage):
+            base["role"] = "user"
+            base["metadata"] = {"msg_type": "HumanMessage"}
+        elif isinstance(msg, AIMessage):
+            base["role"] = "assistant"
+            meta = {"msg_type": "AIMessage"}
+            if getattr(msg, "tool_calls", None):
+                meta["tool_calls"] = msg.tool_calls
+            base["metadata"] = meta
+        elif isinstance(msg, ToolMessage):
+            base["role"] = "tool"
+            base["metadata"] = {
+                "msg_type": "ToolMessage",
+                "tool_name": getattr(msg, "name", ""),
+                "tool_call_id": getattr(msg, "tool_call_id", ""),
+            }
+        elif isinstance(msg, SystemMessage):
+            base["role"] = "system"
+            base["metadata"] = {"msg_type": "SystemMessage"}
+        else:
+            base["role"] = "unknown"
+            base["metadata"] = {"msg_type": type(msg).__name__}
+
+        return base
+
+    @staticmethod
+    def _deserialize_message(row: dict) -> "AnyMessage":
+        """将 SQLite 行 dict 还原为 LangChain Message 对象"""
+        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+
+        content = row.get("content", "") or ""
+        meta = row.get("metadata", {})
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+
+        msg_type = meta.get("msg_type", "")
+
+        if msg_type == "HumanMessage":
+            return HumanMessage(content=content)
+        elif msg_type == "AIMessage":
+            tool_calls = meta.get("tool_calls", [])
+            return AIMessage(content=content, tool_calls=tool_calls if tool_calls else [])
+        elif msg_type == "ToolMessage":
+            return ToolMessage(
+                content=content,
+                name=meta.get("tool_name", ""),
+                tool_call_id=meta.get("tool_call_id", ""),
+            )
+        elif msg_type == "SystemMessage":
+            return SystemMessage(content=content)
+        else:
+            # 回退：旧数据或纯文本消息
+            role = row.get("role", "")
+            if role == "user":
+                return HumanMessage(content=content)
+            elif role == "tool":
+                return ToolMessage(content=content, tool_call_id="legacy")
+            else:
+                return AIMessage(content=content)
+
+    def save_dialogue_messages(self, conv_id: str, messages: list) -> None:
+        """全量保存 Agent 对话消息到 SQLite（DB2 写）
+
+        采用"先清空 → 批量插入"策略，保证幂等:
+          同一 conv_id 的 agent 对话消息只保留最新一批。
+        旧数据中的 user/assistant 消息（来自 add_message）不受影响 —
+        仅清理 msg_type 标记的消息。
+        """
+        if not messages:
+            return
+        try:
+            with self._get_conn() as conn:
+                # 删除该会话中带有 msg_type 标记的消息（Agent 对话专用）
+                conn.execute(
+                    """DELETE FROM conversation_messages
+                       WHERE conv_id = ? AND metadata IS NOT NULL
+                         AND metadata LIKE '%msg_type%'""",
+                    (conv_id,)
+                )
+                # 批量插入
+                for msg in messages:
+                    row = self._serialize_message(msg)
+                    conn.execute(
+                        """INSERT INTO conversation_messages (conv_id, role, content, metadata)
+                           VALUES (?, ?, ?, ?)""",
+                        (
+                            conv_id,
+                            row["role"],
+                            row["content"],
+                            json.dumps(row["metadata"], ensure_ascii=False),
+                        )
+                    )
+                conn.execute(
+                    "UPDATE conversations SET updated_at = datetime('now','localtime') WHERE id = ?",
+                    (conv_id,)
+                )
+                conn.commit()
+        except Exception as e:
+            print(f"[Memory] save_dialogue_messages 失败: {e}")
+
+    def load_dialogue_messages(self, conv_id: str, limit: int = 50) -> list:
+        """加载完整 Agent 对话消息，还原为 LangChain Message 对象列表（DB2 读）
+
+        只加载带有 msg_type 标记的消息（Agent 对话专用），
+        跳过旧版 add_message 写入的纯文本消息。
+        """
+        try:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    """SELECT * FROM conversation_messages
+                       WHERE conv_id = ? AND metadata IS NOT NULL
+                         AND metadata LIKE '%msg_type%'
+                       ORDER BY id ASC LIMIT ?""",
+                    (conv_id, limit)
+                ).fetchall()
+            messages = []
+            for row in rows:
+                d = dict(row)
+                msg = self._deserialize_message(d)
+                messages.append(msg)
+            if messages:
+                print(f"[Memory] 加载 {len(messages)} 条对话消息 (conv={conv_id[:16]})")
+            return messages
+        except Exception as e:
+            print(f"[Memory] load_dialogue_messages 失败: {e}")
+            return []
+
     def search_conversations(self, keyword: str, user_id: str = None, limit: int = 20) -> List[Dict]:
         with self._get_conn() as conn:
             kw = f"%{keyword}%"

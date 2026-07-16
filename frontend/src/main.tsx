@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, App } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -108,19 +108,21 @@ const themeConfig = {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ConfigProvider locale={zhCN} theme={themeConfig}>
-      <BrowserRouter>
-        <AppLayout>
-          <Routes>
-            <Route path="/" element={<Workspace />} />
-            <Route path="/workspace" element={<Workspace />} />
-            <Route path="/materials" element={<MaterialLibrary />} />
-            <Route path="/history" element={<PublishHistory />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/sync" element={<DouyinSync />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </AppLayout>
-      </BrowserRouter>
+      <App>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <AppLayout>
+            <Routes>
+              <Route path="/" element={<Workspace />} />
+              <Route path="/workspace" element={<Workspace />} />
+              <Route path="/materials" element={<MaterialLibrary />} />
+              <Route path="/history" element={<PublishHistory />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/sync" element={<DouyinSync />} />
+              <Route path="/settings" element={<Settings />} />
+            </Routes>
+          </AppLayout>
+        </BrowserRouter>
+      </App>
     </ConfigProvider>
   </React.StrictMode>
 );

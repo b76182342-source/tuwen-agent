@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Input, Button, Upload, Spin, message, Image, Checkbox, Popconfirm } from 'antd';
+import { Input, Button, Upload, Spin, Image, Checkbox, Popconfirm, App } from 'antd';
 import { SendOutlined, PlusOutlined, DeleteOutlined, LoadingOutlined, ReloadOutlined, MessageOutlined, CheckSquareOutlined } from '@ant-design/icons';
 import ChatMessage from '@/components/ChatMessage';
 import type { ChatMessageData } from '@/types';
@@ -23,6 +23,8 @@ const generateConversationSummary = (content: string): string => {
 };
 
 const Workspace: React.FC = () => {
+  const { message } = App.useApp();
+
   // —— 从 Zustand store 获取跨页面持久化状态 ——
   const {
     conversationId, setConversationId,
@@ -69,19 +71,23 @@ const Workspace: React.FC = () => {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, sending]);
 
   useGSAP(() => {
-    if (messages.length > 0) {
+    if (messages.length > 0 && document.querySelector('.chat-message-row:last-child')) {
       animateMessageBubble('.chat-message-row:last-child', false);
+    }
+    if (sending && document.querySelector('.sending-indicator')) {
       gsap.from('.sending-indicator', { opacity: 0, y: -8, duration: 0.25, ease: 'power2.out' });
     }
-  }, { dependencies: [messages.length] });
+  }, { dependencies: [messages.length, sending] });
 
   useGSAP(() => {
-    if (!loaded) return;
+    if (!loaded || !containerRef.current) return;
     const tl = gsap.timeline();
     tl.from(containerRef.current, { opacity: 0, y: 16, duration: 0.5, ease: 'power2.out' });
     if (messages.length === 0 && emptyRef.current) {
       tl.from(emptyRef.current, { opacity: 0, y: 30, duration: 0.5, ease: 'power2.out' }, '+=0.1');
-      tl.from('.pill-suggestion', { opacity: 0, y: 12, duration: 0.3, stagger: 0.06, ease: 'power2.out' }, '+=0.2');
+      if (document.querySelector('.pill-suggestion')) {
+        tl.from('.pill-suggestion', { opacity: 0, y: 12, duration: 0.3, stagger: 0.06, ease: 'power2.out' }, '+=0.2');
+      }
     }
   }, { dependencies: [loaded] });
 
@@ -152,15 +158,70 @@ const Workspace: React.FC = () => {
       const r = await conversationApi.getHistory(convId);
       const msgs = r.data.map((msg: any) => {
         const m = msg.metadata ? JSON.parse(msg.metadata) : {};
-        return { role: msg.role, content: msg.content, tags: m.tags || [], images: m.images || [], musicList: m.music || [], score: m.evaluation_score, level: m.evaluation_level, suggestions: m.agent_suggestions || [] } as ChatMessageData;
+        // 归一化图片字段：后端可能使用 original_url / local_path 等不同字段名
+        const normalizedImages = (m.images || []).map((img: any) => ({
+          url: img.url || img.original_url || img.src || '',
+          path: img.path || img.local_path || img.description || img.desc || '',
+        }));
+        // 归一化配乐字段 + 恢复 showcase
+        const normalizedMusic = (m.music || []).map((mu: any) => ({
+          name: mu.name || '',
+          artist: mu.artist || '',
+          style: mu.style || '',
+          reason: mu.reason || '',
+          preview_url: mu.preview_url || null,
+          can_preview: mu.can_preview || false,
+        }));
+        // 恢复 showcase（评估样例卡片）
+        const restoredShowcase = m.showcase ? {
+          text: m.showcase.text || '',
+          tags: m.showcase.tags || [],
+          images: (m.showcase.images || []).map((img: any) => ({
+            url: img.url || img.original_url || img.src || '',
+            desc: img.desc || img.description || img.path || img.local_path || '',
+          })),
+          music: (m.showcase.music || []).map((mu: any) => ({
+            name: mu.name || '',
+            artist: mu.artist || '',
+            style: mu.style || '',
+            preview_url: mu.preview_url || null,
+            can_preview: mu.can_preview || false,
+          })),
+          score: m.showcase.score || 0,
+          tip: m.showcase.tip || '',
+        } : undefined;
+        return {
+          role: msg.role, content: msg.content,
+          tags: m.tags || [],
+          images: normalizedImages,
+          musicList: normalizedMusic,
+          score: m.evaluation_score,
+          level: m.evaluation_level,
+          suggestions: m.agent_suggestions || [],
+          showcase: restoredShowcase,
+        } as ChatMessageData;
       });
       // 关键：只在后端数据 >= store 当前数据时才覆盖
       // 避免 Agent 还在生成结果时，后端返回旧数据冲掉 store 中已有的更新数据
       const currentMsgs = useAppStore.getState().messages;
       if (msgs.length >= currentMsgs.length) {
-        setMessages(msgs);
-        setIteration(Math.floor(msgs.length / 2));
-        saveMessagesToCache(convId, msgs as any);
+        // 合并：如果后端消息缺少 showcase/images，保留 store 中已有的完整数据
+        const merged = msgs.map((backendMsg, i) => {
+          const storeMsg = currentMsgs[i];
+          if (!storeMsg) return backendMsg;
+          // 保留 store 中更完整的 showcase（后端 metadata 可能不存 showcase）
+          if (backendMsg.skill === 'evaluation' && !backendMsg.showcase && storeMsg.showcase) {
+            return { ...backendMsg, showcase: storeMsg.showcase };
+          }
+          // 保留 store 中更完整的 images（后端可能用不同字段名）
+          if (backendMsg.skill === 'images' && (!backendMsg.images || backendMsg.images.length === 0) && storeMsg.images?.length) {
+            return { ...backendMsg, images: storeMsg.images };
+          }
+          return backendMsg;
+        });
+        setMessages(merged);
+        setIteration(Math.floor(merged.length / 2));
+        saveMessagesToCache(convId, merged as any);
       }
     } catch {
       // 后端不可用：store 或缓存中已有数据就是最新的
@@ -283,9 +344,25 @@ const Workspace: React.FC = () => {
       setExecutionResult(result);
 
       if (result.agent_suggestions?.Skill1?.length) agentMsgs.push({ role: 'agent', skill: 'tags', content: '标签推荐', tags: result.agent_suggestions.Skill1 });
-      if (result.agent_suggestions?.Skill2?.length) agentMsgs.push({ role: 'agent', skill: 'images', content: '图片推荐', images: result.agent_suggestions.Skill2.map((img: any) => ({ url: img.original_url, path: img.local_path || img.description })) });
+      // 收集 Skill2 图片 URL（真实可用的 Pexels/搜索链接）
+      const skill2ImageUrls: { url: string; desc: string }[] = [];
+      if (result.agent_suggestions?.Skill2?.length) {
+        const skill2Images = result.agent_suggestions.Skill2.map((img: any) => ({ url: img.original_url, path: img.local_path || img.description }));
+        agentMsgs.push({ role: 'agent', skill: 'images', content: '图片推荐', images: skill2Images });
+        skill2ImageUrls.push(...skill2Images.map((img: any) => ({ url: img.url, desc: img.path || '' })));
+      }
       if (result.agent_suggestions?.Skill3?.length) agentMsgs.push({ role: 'agent', skill: 'music', content: '配乐推荐', musicList: result.agent_suggestions.Skill3.map((m: any) => ({ name: m.name, artist: m.artist, style: m.style, reason: m.reason })) });
-      if (result.evaluation) { const ev = result.evaluation; agentMsgs.push({ role: 'agent', skill: 'evaluation', content: '内容评估', score: ev.score, level: ev.level, suggestions: ev.suggestions, showcase: ev.showcase }); }
+      if (result.evaluation) {
+        const ev = result.evaluation;
+        // 用 Skill2 的真实图片 URL 覆盖 showcase 中的图片（showcase 可能用了不同数据源导致 404）
+        const showcase = ev.showcase ? {
+          ...ev.showcase,
+          images: skill2ImageUrls.length > 0
+            ? skill2ImageUrls.map((img, i) => ({ url: img.url, desc: ev.showcase?.images?.[i]?.desc || img.desc }))
+            : (ev.showcase.images || []),
+        } : undefined;
+        agentMsgs.push({ role: 'agent', skill: 'evaluation', content: '内容评估', score: ev.score, level: ev.level, suggestions: ev.suggestions, showcase });
+      }
 
       const finalMsgs = [...newMsgs, ...agentMsgs];
       setMessages(finalMsgs);
@@ -437,7 +514,10 @@ const Workspace: React.FC = () => {
             </div>
           </div>
         ) : (
-          messages.map((msg, i) => <div key={i} className="chat-message-row"><ChatMessage message={msg} /></div>)
+          messages.map((msg, i) => {
+            const key = `msg-${i}-${msg.role}-${msg.skill || 'text'}`;
+            return <div key={key} className="chat-message-row"><ChatMessage message={msg} /></div>;
+          })
         )}
         {sending && (
           <div className="sending-indicator" style={{ display:'flex',alignItems:'center',gap:10,padding:'12px 0',color:'#A8A29E',fontSize:13 }}>

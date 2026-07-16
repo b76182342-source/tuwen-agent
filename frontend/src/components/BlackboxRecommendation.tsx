@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Card, Alert, Button, Space, List, Tag, Progress, message } from 'antd';
+import { Card, Alert, Button, Space, List, Tag, Progress, App } from 'antd';
 import { ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useAppStore } from '@/stores/appStore';
 import { agentApi } from '@/services/api';
 
 const BlackboxRecommendation: React.FC = () => {
+  const { message } = App.useApp();
   const { executionResult, conversationId, setExecutionResult, setExecutionStages } = useAppStore();
   const [reExecuting, setReExecuting] = useState(false);
 

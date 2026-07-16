@@ -10,12 +10,13 @@ from langgraph.graph import StateGraph, END
 from backend.graph.state import AgentState
 from backend.graph.nodes import (
     initialize, classify_intent, generate_copy, optimize_copy,
-    parse_modify_intent, question_response, analyze_emotion_node,
+    parse_modify_intent, agent_dialogue, analyze_emotion_node,
     analyze_content, decide_skills,
     execute_all_skills,
     evaluate_node, check_threshold,
     identify_weak_dimension, rerun_skill, rerun_evaluate,
 )
+from utils.memory import MemoryManager
 
 MAX_ITERATIONS = 3
 SCORE_THRESHOLD = 4.0
@@ -27,7 +28,7 @@ SCORE_THRESHOLD = 4.0
 
 def route_by_intent(state: AgentState) -> Literal[
     "generate_copy", "optimize_copy", "parse_modify_intent",
-    "question_response", "analyze_emotion"
+    "agent_dialogue", "analyze_emotion"
 ]:
     """classify_intent 后的路由"""
     intent = state.get("intent", "create")
@@ -42,7 +43,7 @@ def route_by_intent(state: AgentState) -> Literal[
     elif intent == "modify" and has_context:
         return "parse_modify_intent"
     elif intent == "question":
-        return "question_response"
+        return "agent_dialogue"
     # fallback
     return "analyze_emotion"
 
@@ -77,6 +78,13 @@ def route_after_weak(state: AgentState) -> Literal["rerun_skill", "finalize"]:
     return "rerun_skill"
 
 
+def route_after_dialogue(state: AgentState) -> Literal["enter_workflow", "end"]:
+    """agent_dialogue 后路由：LLM 是否决定进入创作管线"""
+    if state.get("should_enter_workflow"):
+        return "enter_workflow"
+    return "end"
+
+
 # ============================================================
 # Graph 构建
 # ============================================================
@@ -92,7 +100,7 @@ def build_graph() -> StateGraph:
     builder.add_node("generate_copy", generate_copy)
     builder.add_node("optimize_copy", optimize_copy)
     builder.add_node("parse_modify_intent", parse_modify_intent)
-    builder.add_node("question_response", question_response)
+    builder.add_node("agent_dialogue", agent_dialogue)
     builder.add_node("analyze_emotion", analyze_emotion_node)
     builder.add_node("analyze_content", analyze_content)
     builder.add_node("decide_skills", decide_skills)
@@ -117,7 +125,7 @@ def build_graph() -> StateGraph:
             "generate_copy": "generate_copy",
             "optimize_copy": "optimize_copy",
             "parse_modify_intent": "parse_modify_intent",
-            "question_response": "question_response",
+            "agent_dialogue": "agent_dialogue",
             "analyze_emotion": "analyze_emotion",
         }
     )
@@ -131,7 +139,15 @@ def build_graph() -> StateGraph:
         {"optimize_copy": "optimize_copy", "analyze_emotion": "analyze_emotion"}
     )
 
-    builder.add_edge("question_response", END)
+    # agent_dialogue → 条件路由：进入管线 还是 结束对话
+    builder.add_conditional_edges(
+        "agent_dialogue",
+        route_after_dialogue,
+        {
+            "enter_workflow": "analyze_emotion",
+            "end": END,
+        }
+    )
 
     builder.add_edge("analyze_emotion", "analyze_content")
     builder.add_edge("analyze_content", "decide_skills")
@@ -213,6 +229,9 @@ def run_agent(user_input: dict, conversation_id: str = "") -> Dict[str, Any]:
         "best_final_images": [],
         "best_final_music": [],
         "loop_history": [],
+        "dialogue_messages": [],
+        "should_enter_workflow": False,
+        "workflow_intent_override": "",
         "result": {},
         "execution_log": [],
         "error": None,
@@ -246,16 +265,58 @@ def run_agent(user_input: dict, conversation_id: str = "") -> Dict[str, Any]:
     }
 
     report = eval_out.get("report", "")
+    is_dialogue = eval_out.get("level", "") == "对话回复" or eval_out.get("level", "") == "进入创作管线"
+
+    # 管线结果才加迭代前缀；Agent 对话保持原文
     iteration = final_state.get("iteration", 0)
-    if iteration > 0:
+    if iteration > 0 and not is_dialogue:
         report = f"> 第 {iteration} 轮优化 (最佳评分 {max(best_score, current_score):.1f})\n\n{report}"
 
-    if eval_out.get("score", 0) >= SCORE_THRESHOLD:
+    if eval_out.get("score", 0) >= SCORE_THRESHOLD and not is_dialogue:
         report += "\n\n---\n> ✅ 评分达标，可以发布。"
-    elif iteration >= MAX_ITERATIONS:
+    elif not is_dialogue and iteration >= MAX_ITERATIONS:
         report += "\n\n---\n> ⚠️ 已达最大优化次数，输出当前最佳结果。"
-    else:
+    elif not is_dialogue and eval_out.get("score", 0) > 0:
         report += "\n\n---\n> ⚠️ 评分未达 4.0。输入\"优化\"我会自动改进。"
+
+    # ============================================================
+    # 持久化: DB1 摘要 (Redis) + DB2 消息 (SQLite)
+    # 仅管线路径持久化；纯 Agent 对话由 agent_dialogue 节点自己处理
+    # ============================================================
+    if conversation_id and eval_out.get("score", 0) > 0 and not is_dialogue:
+        try:
+            mem = MemoryManager()
+            # DB1: 摘要 — 供 initialize 恢复
+            summary = {
+                "topic": final_state.get("copy_text", "")[:80],
+                "last_score": eval_out.get("score", 0),
+                "last_tags": tags[:10],
+                "last_images": images[:4],
+                "last_music": music[:3],
+                "last_evaluation": {
+                    "score": eval_out.get("score", 0),
+                    "level": eval_out.get("level", ""),
+                    "suggestions": eval_out.get("suggestions", [])[:3],
+                },
+                "total_rounds": final_state.get("iteration", 0),
+                "loop_history": final_state.get("loop_history", []),
+            }
+            mem.save_session_summary(conversation_id, summary)
+
+            # DB2: 管线结果消息
+            from langchain_core.messages import HumanMessage, AIMessage
+            workflow_messages = [
+                HumanMessage(content=user_input.get("text", "")),
+                AIMessage(
+                    content=f"管线完成 | 评分 {eval_out.get('score', 0)}/5.0 | "
+                            f"标签 {len(tags)} 个 | 图片 {len(images)} 张 | 配乐 {len(music)} 首",
+                    tool_calls=[],
+                ),
+            ]
+            mem.save_dialogue_messages(conversation_id, workflow_messages)
+            print(f"[Graph:run] DB1+DB2 持久化完成: score={eval_out.get('score', 0)}")
+        except Exception as e:
+            print(f"[Graph:run] 持久化失败: {e}")
 
     return {
         "creator_content": {

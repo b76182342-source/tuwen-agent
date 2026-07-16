@@ -2,7 +2,7 @@
  * 数据分析页 v2 — 对齐抖音数据维度
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Card, Row, Col, Statistic, Table, Tag, Progress, message } from 'antd';
+import { Card, Row, Col, Statistic, Table, Tag, Progress, App } from 'antd';
 import {
   LikeOutlined, MessageOutlined, EyeOutlined, TrophyOutlined,
   ShareAltOutlined, RiseOutlined, FallOutlined, StarOutlined,
@@ -19,6 +19,7 @@ const CHART = {
 };
 
 const Analytics: React.FC = () => {
+  const { message } = App.useApp();
   const [analytics, setAnalytics] = useState<PersonalDataAnalysis | null>(null);
   const [trafficTrend, setTrafficTrend] = useState<TrafficDailyItem[]>([]);
   const [followerTrend, setFollowerTrend] = useState<FollowerDailyItem[]>([]);

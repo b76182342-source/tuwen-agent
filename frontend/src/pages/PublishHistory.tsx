@@ -2,7 +2,7 @@
  * 发布历史页 v2 — 对齐抖音数据维度
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Card, Table, Tag, Button, Space, Modal, Descriptions, message, Statistic, Row, Col } from 'antd';
+import { Card, Table, Tag, Button, Space, Modal, Descriptions, Statistic, Row, Col, App } from 'antd';
 import {
   EyeOutlined, LikeOutlined, ReloadOutlined, DeleteOutlined,
   TrophyOutlined, RiseOutlined,
@@ -16,6 +16,7 @@ import { usePresetCardStagger } from '@/hooks/useAnimations';
 const CHART = { likes: '#059669', views: '#2563EB', comments: '#78716C' };
 
 const PublishHistoryPage: React.FC = () => {
+  const { message } = App.useApp();
   const navigate = useNavigate();
   const [history, setHistory] = useState<PublishHistory[]>([]);
   const [loading, setLoading] = useState(false);

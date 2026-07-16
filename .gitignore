@@ -53,6 +53,9 @@ server_stderr.log
 # Qdrant 数据
 .qdrant-initialized
 
+# Docker 运行时数据（Qdrant / Redis 持久化卷）
+docker_data/
+
 # 流量/粉丝数据（Excel 导出）
 流量数据.xlsx
 粉丝数据.xlsx

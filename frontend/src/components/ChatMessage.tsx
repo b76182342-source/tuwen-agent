@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Image, Row, Col, message } from 'antd';
+import { Image, Row, Col, App } from 'antd';
 import { PlayCircleOutlined, PauseCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useGSAP, gsap, animateMessageBubble, animateCrossfade, animateExpand } from '@/hooks/useAnimations';
 import type { ChatMessageData } from '@/types';
@@ -19,6 +19,7 @@ let _currentAudio: HTMLAudioElement | null = null;
 function stopGlobalAudio() { if (_currentAudio) { _currentAudio.pause(); _currentAudio.currentTime = 0; _currentAudio = null; } }
 
 const MusicPreview: React.FC<{ url: string; name: string }> = ({ url, name }) => {
+  const { message } = App.useApp();
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -39,6 +40,7 @@ const MusicPreview: React.FC<{ url: string; name: string }> = ({ url, name }) =>
 
   // GSAP: 播放按钮颜色过渡
   useGSAP(() => {
+    if (!btnRef.current) return;
     gsap.to(btnRef.current, {
       backgroundColor: playing ? '#D97706' : 'transparent',
       color: playing ? '#fff' : '#A8A29E',
@@ -49,6 +51,7 @@ const MusicPreview: React.FC<{ url: string; name: string }> = ({ url, name }) =>
 
   // GSAP: 进度条动画
   useGSAP(() => {
+    if (!barRef.current) return;
     gsap.to(barRef.current, { width: `${progress}%`, duration: 0.15, ease: 'power1.out' });
   }, { dependencies: [progress] });
 
@@ -103,26 +106,25 @@ const ShowcaseCard: React.FC<{ s: NonNullable<ChatMessageData['showcase']>; scor
 
   // GSAP: 图片切换交叉淡入
   useGSAP(() => {
+    if (!imgRef.current) return;
     animateCrossfade(imgRef.current);
   }, { dependencies: [idx] });
 
   // GSAP: 圆点动画
   useGSAP(() => {
-    if (dotsRef.current) {
-      gsap.to(dotsRef.current.querySelectorAll('.carousel-dot'), {
-        width: (i: number) => i === idx ? 14 : 4,
-        background: (i: number) => i === idx ? '#fff' : 'rgba(255,255,255,0.4)',
-        duration: 0.2,
-        ease: 'power2.out',
-      });
-    }
+    if (!dotsRef.current) return;
+    gsap.to(dotsRef.current.querySelectorAll('.carousel-dot'), {
+      width: (i: number) => i === idx ? 14 : 4,
+      background: (i: number) => i === idx ? '#fff' : 'rgba(255,255,255,0.4)',
+      duration: 0.2,
+      ease: 'power2.out',
+    });
   }, { dependencies: [idx] });
 
   // GSAP: 配乐下拉动画
   useGSAP(() => {
-    if (musicOpen && dropdownRef.current) {
-      animateExpand(dropdownRef.current, 0.2);
-    }
+    if (!musicOpen || !dropdownRef.current) return;
+    animateExpand(dropdownRef.current, 0.2);
   }, { dependencies: [musicOpen] });
 
   return (
@@ -130,8 +132,17 @@ const ShowcaseCard: React.FC<{ s: NonNullable<ChatMessageData['showcase']>; scor
       <div style={{ maxWidth:300, margin:'0 auto', borderRadius:10, overflow:'hidden', border:'1px solid #E7E5E4' }}>
         {/* 图片 */}
         {s.images.length > 0 ? (
-          <div style={{ position:'relative',aspectRatio:'4/5',background:'#292524' }}>
-            <div ref={imgRef}><Image src={s.images[idx].url} width="100%" height="100%" style={{ objectFit:'cover' }} preview={false} /></div>
+          <div style={{ position:'relative',aspectRatio:'4/5',background:'#292524',overflow:'hidden' }}>
+            <div ref={imgRef} style={{ position:'absolute',top:0,left:0,width:'100%',height:'100%' }}>
+              <Image
+                src={s.images[idx]?.url || s.images[idx]?.desc || ''}
+                width="100%"
+                height="100%"
+                style={{ objectFit:'cover',display:'block' }}
+                preview={false}
+                fallback="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='375'%3E%3Crect fill='%23292524' width='300' height='375'/%3E%3Ctext fill='%23555' x='50%25' y='50%25' text-anchor='middle' dy='.3em' font-size='14'%3E暂无图片%3C/text%3E%3C/svg%3E"
+              />
+            </div>
             <div style={{ position:'absolute',bottom:0,left:0,right:0,height:'30%',background:'linear-gradient(transparent,rgba(0,0,0,0.15))',pointerEvents:'none' }} />
             {s.images.length > 1 && <>
               <span onClick={() => setIdx(p=>(p-1+s.images.length)%s.images.length)} style={{ position:'absolute',left:6,top:'50%',transform:'translateY(-50%)',width:24,height:24,borderRadius:'50%',background:'rgba(255,255,255,0.8)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:14,color:'#444' }}>‹</span>
@@ -142,7 +153,7 @@ const ShowcaseCard: React.FC<{ s: NonNullable<ChatMessageData['showcase']>; scor
             </>}
             <span style={{ position:'absolute',top:8,right:8,background:'rgba(0,0,0,0.3)',color:'#fff',padding:'1px 7px',borderRadius:6,fontSize:10 }}>{idx+1}/{s.images.length}</span>
           </div>
-        ) : <div style={{ aspectRatio:'4/5',background:'#F5F5F4',display:'flex',alignItems:'center',justifyContent:'center',color:'#D6D3D1',fontSize:12 }}>暂无图片</div>}
+        ) : <div style={{ aspectRatio:'4/5',background:'#F5F5F4',display:'flex',alignItems:'center',justifyContent:'center',color:'#D6D3D1',fontSize:12,overflow:'hidden' }}>暂无图片</div>}
 
         {/* 文案 + 标签 + 评分 — 紧凑排版 */}
         <div style={{ padding:'12px 14px 10px' }}>
@@ -191,6 +202,7 @@ const ChatMessage: React.FC<{ message: ChatMessageData }> = ({ message }) => {
 
   // GSAP: 消息气泡入场动画
   useGSAP(() => {
+    if (!rowRef.current) return;
     animateMessageBubble(rowRef.current, role === 'user');
   }, []);
 
@@ -204,7 +216,11 @@ const ChatMessage: React.FC<{ message: ChatMessageData }> = ({ message }) => {
           </div>
           {images && images.length > 0 && (
             <div style={{ marginTop:6,display:'flex',gap:4,justifyContent:'flex-end' }}>
-              {images.slice(0,4).map((img,i) => <Image key={i} src={img.url} width={48} height={48} style={{ borderRadius:6,objectFit:'cover' }} fallback="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>" />)}
+              {images.slice(0,4).map((img,i) => (
+                <div key={i} style={{ width:48,height:48,borderRadius:6,overflow:'hidden',flexShrink:0 }}>
+                  <Image src={img.url || img.path || ''} width={48} height={48} style={{ objectFit:'cover',display:'block' }} preview={false} fallback="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect fill='%23F5F5F4' width='48' height='48'/%3E%3C/svg%3E" />
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -245,7 +261,15 @@ const ChatMessage: React.FC<{ message: ChatMessageData }> = ({ message }) => {
           <Row gutter={[6,6]}>
             {images?.map((img,i) => (
               <Col span={6} key={i}>
-                <Image src={img.url||img.path} width="100%" style={{ borderRadius:6,objectFit:'cover',aspectRatio:'3/4' }} fallback="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>" />
+                <div style={{ position:'relative',aspectRatio:'3/4',overflow:'hidden',borderRadius:6 }}>
+                  <Image
+                    src={img.url || img.path || ''}
+                    width="100%"
+                    height="100%"
+                    style={{ objectFit:'cover',display:'block',position:'absolute',top:0,left:0 }}
+                    fallback="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='133'%3E%3Crect fill='%23F5F5F4' width='100' height='133'/%3E%3C/svg%3E"
+                  />
+                </div>
               </Col>
             ))}
           </Row>

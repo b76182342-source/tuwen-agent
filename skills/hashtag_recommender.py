@@ -270,11 +270,16 @@ class HashtagRecommender:
             ]
             return result
 
-        # ── 最终兜底: 规则结果 ──
-        result = []
-        for i, c in enumerate(merged_candidates[:count]):
-            reason = cls.REASON_TEMPLATES[i % len(cls.REASON_TEMPLATES)] if cls.REASON_TEMPLATES else "相关话题推荐"
-            result.append({"tag": c["tag"], "reason": reason})
+        # ── 兜底: 规则结果 ──
+        if merged_candidates:
+            result = []
+            for i, c in enumerate(merged_candidates[:count]):
+                reason = cls.REASON_TEMPLATES[i % len(cls.REASON_TEMPLATES)] if cls.REASON_TEMPLATES else "相关话题推荐"
+                result.append({"tag": c["tag"], "reason": reason})
+            return result
+
+        # ── 最终兜底: 用关键词本身作为标签 ──
+        result = [{"tag": f"#{kw}", "reason": "关键词匹配推荐"} for kw in keywords[:count]]
         return result
 
     @classmethod

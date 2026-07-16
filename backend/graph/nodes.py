@@ -7,7 +7,10 @@ import json
 import time
 from typing import Dict, Any
 
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+
 from backend.graph.state import AgentState
+from backend.graph.tools import ALL_TOOLS, TOOL_BY_NAME
 from backend.constants import (
     MIN_TEXT_LENGTH_FOR_TOPIC, VALID_INTENTS,
     INTENT_TOPIC, INTENT_CREATE, INTENT_OPTIMIZE, INTENT_MODIFY, INTENT_QUESTION,
@@ -21,58 +24,97 @@ from utils.memory import MemoryManager
 
 memory = MemoryManager()
 
+# Agent 对话最大 ReAct 迭代次数
+MAX_AGENT_ITERATIONS = 5
+
 
 # ============================================================
-# Node 1: initialize — 加载 session + context
+# Node 1: initialize — 双层记忆恢复 (DB1 Redis + DB2 SQLite)
 # ============================================================
 
 def initialize(state: AgentState) -> Dict[str, Any]:
-    """从 conversation_id 或 session_id 恢复会话上下文"""
+    """从 DB1 (Redis 摘要) + DB2 (SQLite 完整消息) 恢复会话上下文
+
+    双层设计:
+      DB1 摘要 — 供所有节点使用: topic, last_score, user_style, last_tags...
+      DB2 消息 — 仅供 agent_dialogue 使用: 完整 LangChain Message 对象列表
+
+    两层独立读、独立写，互不依赖。
+    """
     user_input = state.get("user_input", {})
     conversation_id = state.get("conversation_id", "")
     session = {}
-    context = {}
     has_context = False
     prev_copy_text = ""
     prev_evaluation = {}
     prev_tags = []
     prev_images = []
     prev_music = []
+    dialogue_messages = []
+    summary = {}
 
     if conversation_id:
+        # ── DB1: 加载摘要 ──
         try:
-            ctx = memory.get_context_for_agent(conversation_id, max_messages=MAX_CONTEXT_MSGS)
-            msgs = ctx.get("messages", [])
-            context = ctx
+            summary = memory.load_session_summary(conversation_id) or {}
+            if summary:
+                print(f"[Graph:init] DB1 摘要命中: topic={summary.get('topic','?')[:30]} "
+                      f"score={summary.get('last_score','?')} rounds={summary.get('total_rounds','?')}")
+        except Exception as e:
+            print(f"[Graph:init] DB1 摘要加载失败: {e}")
+            summary = {}
 
-            for msg in reversed(msgs):
-                if msg.get("role") == "assistant":
+        # ── 从摘要恢复 Workflow 上下文 ──
+        if summary:
+            prev_copy_text = summary.get("topic", "")
+            prev_evaluation = summary.get("last_evaluation", {})
+            prev_tags = summary.get("last_tags", [])
+            prev_images = summary.get("last_images", [])
+            prev_music = summary.get("last_music", [])
+            has_context = bool(prev_copy_text)
+
+        # ── DB2: 加载完整对话消息 ──
+        try:
+            dialogue_messages = memory.load_dialogue_messages(conversation_id, limit=50)
+            if dialogue_messages:
+                print(f"[Graph:init] DB2 消息恢复: {len(dialogue_messages)} 条")
+        except Exception as e:
+            print(f"[Graph:init] DB2 消息加载失败: {e}")
+            dialogue_messages = []
+
+        # ── 兜底: 如果 DB1 无摘要，尝试从 DB2 的消息中提取上下文 ──
+        if not has_context and dialogue_messages:
+            # 从最近的消息中找用户文案
+            for msg in reversed(dialogue_messages):
+                from langchain_core.messages import HumanMessage
+                if isinstance(msg, HumanMessage) and msg.content and \
+                   msg.content not in ("优化一下", "换标签", "换个配乐", "重试"):
+                    prev_copy_text = msg.content[:120]
+                    has_context = True
+                    break
+
+        # ── 再兜底: 旧版 add_message 格式 ──
+        if not has_context and conversation_id:
+            try:
+                ctx = memory.get_context_for_agent(conversation_id, max_messages=MAX_CONTEXT_MSGS)
+                msgs = ctx.get("messages", [])
+                for msg in reversed(msgs):
                     meta = msg.get("metadata")
                     if isinstance(meta, str):
                         meta = json.loads(meta) if meta else {}
-                    if isinstance(meta, dict):
-                        if meta.get("evaluation"):
-                            session["evaluation"] = meta["evaluation"]
-                            prev_evaluation = meta["evaluation"]
-                        showcase = meta["evaluation"].get("showcase", {})
-                        if showcase.get("images"):
-                            prev_images = showcase["images"]
-                        if showcase.get("tags"):
-                            prev_tags = [f"#{t}" if not t.startswith('#') else t for t in showcase["tags"]]
-                        if showcase.get("music"):
-                            prev_music = showcase["music"]
-                    break
+                    if isinstance(meta, dict) and meta.get("evaluation"):
+                        prev_evaluation = prev_evaluation or meta["evaluation"]
+                    if not prev_copy_text and msg.get("role") == "user" and msg.get("content"):
+                        prev_copy_text = msg["content"]
+                has_context = bool(prev_copy_text)
+            except Exception:
+                pass
 
-            for msg in reversed(msgs):
-                if msg.get("role") == "user" and msg.get("content") and \
-                   msg["content"] not in ("优化一下", "换标签", "换个配乐", "重试"):
-                    prev_copy_text = msg["content"]
-                    break
-
-            has_context = bool(prev_copy_text)
-            print(f"[Graph:init] 重建会话: text={has_context} images={len(prev_images)} eval={bool(prev_evaluation)}")
-        except Exception as e:
-            print(f"[Graph:init] 失败: {e}")
+    # ── 构建 session 对象（供旧代码兼容） ──
+    session = {
+        "summary": summary,
+        "has_context": has_context,
+    }
 
     return {
         "session": session,
@@ -82,9 +124,10 @@ def initialize(state: AgentState) -> Dict[str, Any]:
         "prev_tags": prev_tags,
         "prev_images": prev_images,
         "prev_music": prev_music,
+        "dialogue_messages": dialogue_messages,  # ← Agent 对话直接复用，不需重新加载
         "copy_text": user_input.get("text", ""),
-        "iteration": session.get("iteration", 0),
-        "loop_history": session.get("loop_history", []),
+        "iteration": 0,  # 每次请求独立计数，不从 DB1 继承
+        "loop_history": summary.get("loop_history", []),
         "execution_log": [],
     }
 
@@ -252,52 +295,246 @@ def parse_modify_intent(state: AgentState) -> Dict[str, Any]:
             "keep_music": result.keep_music,
         }
         print(f"[Graph:modify] {flags}")
-        return {"modify_flags": flags}
+        update = {"modify_flags": flags}
+        # 不修改文案时，用上一轮文案替换用户的指令文本
+        if not flags.get("change_copy"):
+            prev = state.get("prev_copy_text", "")
+            if prev:
+                update["copy_text"] = prev
+        return update
     except Exception as e:
         print(f"[Graph:modify] 失败: {e}")
 
     # 关键词回退
     fb = user_feedback
-    return {"modify_flags": {
+    flags = {
         "change_copy": any(kw in fb for kw in ["文案", "文字", "风格", "改写", "优化"]),
         "change_tags": any(kw in fb for kw in ["标签", "tag"]),
         "change_images": any(kw in fb for kw in ["图片", "图", "照片"]),
         "change_music": any(kw in fb for kw in ["配乐", "音乐", "bgm"]),
         "keep_tags": False, "keep_images": False, "keep_music": False,
-    }}
-
-
-# ============================================================
-# Node 6: question_response — LLM 问答
-# ============================================================
-
-def question_response(state: AgentState) -> Dict[str, Any]:
-    """question 意图：对话式回答"""
-    text = state.get("copy_text", "")
-    prev_tags = state.get("prev_tags", [])
-    prev_text = state.get("prev_copy_text", "")
-    prev_score = state.get("prev_evaluation", {}).get("score", 0)
-
-    q_prompt = f"""用户在上一轮获得了创作推荐，现在问了一个问题。
-上一轮: 文案={prev_text[:100]} 标签={', '.join(prev_tags[:8])} 评分={prev_score}/5.0
-
-用户问题: {text}
-请用简洁中文回答，2-4句话。"""
-
-    try:
-        llm = get_chat_model(temperature=0.7, max_tokens=200, timeout=15)
-        structured = llm.with_structured_output(QuestionAnswer, method="function_calling")
-        result = structured.invoke([
-            {"role": "system", "content": "你是创作顾问。"},
-            {"role": "user", "content": q_prompt},
-        ])
-        answer = result.answer
-    except Exception:
-        answer = "你可以输入'优化'来改进当前内容，或输入'换标签'来更换推荐。"
-
-    return {
-        "evaluation": {"score": prev_score, "level": "对话回复", "report": answer, "suggestions": []},
     }
+    update = {"modify_flags": flags}
+    if not flags["change_copy"]:
+        prev = state.get("prev_copy_text", "")
+        if prev:
+            update["copy_text"] = prev
+    return update
+
+
+# ============================================================
+# Node 6: agent_dialogue — ReAct Agent 对话（替代 question_response）
+# ============================================================
+
+def agent_dialogue(state: AgentState) -> Dict[str, Any]:
+    """Agent 对话节点：LLM + tools 自由交互
+
+    两阶段设计：
+      阶段1 — ReAct 循环：LLM 自由调用工具（推荐标签/评估/情绪分析...）
+      阶段2 — 路由判断：如果 LLM 调用了 enter_creation_workflow →
+              设置 should_enter_workflow=True，走主流程管线
+
+    否则返回对话结果，走到 END。
+    """
+    text = state.get("copy_text", "")
+    prev_text = state.get("prev_copy_text", "")
+    prev_tags = state.get("prev_tags", [])
+    prev_images = state.get("prev_images", [])
+    prev_music = state.get("prev_music", [])
+    prev_eval = state.get("prev_evaluation", {})
+    conversation_id = state.get("conversation_id", "")
+
+    # ── 构建系统提示 ──
+    context_blocks = []
+    if prev_text:
+        context_blocks.append(f"上一轮文案：{prev_text[:120]}")
+    if prev_tags:
+        context_blocks.append(f"上一轮标签：{', '.join(prev_tags[:8])}")
+    if prev_eval.get("score"):
+        context_blocks.append(f"上一轮评分：{prev_eval['score']}/5.0")
+
+    context_str = "\n".join(context_blocks) if context_blocks else "全新会话，无历史记录。"
+
+    system_prompt = f"""你是抖音创作顾问，帮助用户完成图文创作。
+
+## 当前会话状态
+{context_str}
+
+## 工作方式
+1. 回答用户的创作问题，给出专业建议
+2. 如果用户想分析内容，使用 evaluate_content 工具评估
+3. 如果用户想了解情绪基调，使用 analyze_emotion_tool 分析
+4. 如果用户想看标签/图片/配乐建议，分别调用对应工具
+5. **关键**：当用户明确想要一整套完整的创作素材（文案+标签+图片+配乐），
+   调用 enter_creation_workflow 进入自动化创作管线。
+   - 用户只给主题/想法 → workflow_intent="topic"
+   - 用户已有文案 → workflow_intent="create"
+
+## 重要规则
+- 不要编造标签或推荐结果，必须通过工具获取
+- 每次回复简洁专业，2-5句话
+- 如果只是普通问题或闲聊，直接回答，不要调用工具"""
+
+    # ── 加载/初始化对话消息 ──
+    dialogue_messages = list(state.get("dialogue_messages", []))
+
+    # 从 SQLite 恢复历史（仅在首次对话时）
+    if not dialogue_messages and conversation_id:
+        try:
+            ctx = memory.get_context_for_agent(conversation_id, max_messages=MAX_CONTEXT_MSGS)
+            for msg in ctx.get("messages", []):
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "user":
+                    dialogue_messages.append(HumanMessage(content=content))
+                elif role == "assistant":
+                    dialogue_messages.append(AIMessage(content=content))
+            if dialogue_messages:
+                print(f"[Graph:agent] 从 SQLite 恢复 {len(dialogue_messages)} 条历史消息")
+        except Exception as e:
+            print(f"[Graph:agent] 加载历史失败: {e}")
+
+    # 追加当前用户消息
+    dialogue_messages.append(HumanMessage(content=text))
+
+    # ── ReAct 循环 ──
+    llm = get_chat_model(temperature=0.7, max_tokens=600, timeout=30)
+    llm_with_tools = llm.bind_tools(ALL_TOOLS)
+
+    should_enter = False
+    workflow_intent_override = "topic"
+    final_answer = ""
+    tool_log = []
+
+    for iteration in range(MAX_AGENT_ITERATIONS):
+        try:
+            response = llm_with_tools.invoke(
+                [SystemMessage(content=system_prompt)] + dialogue_messages
+            )
+        except Exception as e:
+            print(f"[Graph:agent] LLM 调用失败 (iter {iteration}): {e}")
+            final_answer = "抱歉，我暂时无法处理你的请求，请稍后重试。"
+            break
+
+        dialogue_messages.append(response)
+
+        # 没有工具调用 → Agent 认为对话结束
+        if not response.tool_calls:
+            final_answer = response.content or ""
+            break
+
+        # 处理工具调用
+        for tool_call in response.tool_calls:
+            tool_name = tool_call.get("name", "")
+            tool_args = tool_call.get("args", {})
+            tool_id = tool_call.get("id", "")
+
+            print(f"[Graph:agent] 调用工具: {tool_name}({json.dumps(tool_args, ensure_ascii=False)[:80]})")
+
+            tool_func = TOOL_BY_NAME.get(tool_name)
+            if tool_func is None:
+                result_str = f"未知工具: {tool_name}"
+            else:
+                try:
+                    result_str = tool_func.invoke(tool_args)
+                except Exception as e:
+                    result_str = f"工具调用失败: {e}"
+
+            # 检测是否触发了 enter_creation_workflow
+            if tool_name == "enter_creation_workflow":
+                should_enter = True
+                workflow_intent_override = tool_args.get("workflow_intent", "topic")
+                # 解析工具返回的 JSON
+                try:
+                    parsed = json.loads(result_str)
+                    tool_log.append({
+                        "skill": "Agent → Workflow",
+                        "status": "triggered",
+                        "reason": parsed.get("reason", ""),
+                        "timestamp": time.strftime("%H:%M:%S"),
+                    })
+                except Exception:
+                    pass
+
+            dialogue_messages.append(
+                ToolMessage(content=str(result_str), tool_call_id=tool_id)
+            )
+            tool_log.append({
+                "skill": tool_name,
+                "status": "completed",
+                "timestamp": time.strftime("%H:%M:%S"),
+            })
+
+        # 如果触发了 enter_creation_workflow，立刻结束循环
+        if should_enter:
+            final_answer = response.content or "正在为你生成完整的创作素材包..."
+            break
+
+    # ── 如果没有显式 final_answer（所有迭代都是工具调用），取最后一次 LLM 回复 ──
+    if not final_answer and dialogue_messages:
+        for msg in reversed(dialogue_messages):
+            if isinstance(msg, AIMessage) and msg.content:
+                final_answer = msg.content
+                break
+    if not final_answer:
+        final_answer = "你可以输入'优化'来改进当前内容，或输入'换标签'来更换推荐。"
+
+    # ── 持久化: DB1 摘要 + DB2 完整消息 ──
+    if conversation_id:
+        # DB2: 全量保存 dialogue_messages（含 ToolMessage、tool_calls）
+        try:
+            memory.save_dialogue_messages(conversation_id, dialogue_messages)
+        except Exception as e:
+            print(f"[Graph:agent] DB2 保存失败: {e}")
+
+        # DB1: 更新摘要（从对话中提取关键信息）
+        try:
+            existing = memory.load_session_summary(conversation_id) or {}
+            # 合并已有摘要 + 本轮新信息
+            existing["total_rounds"] = existing.get("total_rounds", 0) + 1
+            existing["last_updated"] = ""
+            # 保留已有偏好，本轮对话如果发现新偏好会追加
+            if not existing.get("topic") and text:
+                existing["topic"] = text[:80]
+
+            # 从工具调用结果中提取有用信息
+            for entry in tool_log:
+                if entry.get("skill") == "evaluate_content":
+                    existing["last_score"] = entry.get("score", existing.get("last_score", 0))
+
+            memory.save_session_summary(conversation_id, existing)
+        except Exception as e:
+            print(f"[Graph:agent] DB1 摘要更新失败: {e}")
+
+    # ── 返回状态更新 ──
+    result = {
+        "dialogue_messages": dialogue_messages,
+        "should_enter_workflow": should_enter,
+        "execution_log": tool_log,
+    }
+
+    if should_enter:
+        # 进入管线：覆盖 intent，让后续 analyze_content 正确判断组件需求
+        result["intent"] = workflow_intent_override
+        result["workflow_intent_override"] = workflow_intent_override
+        # 保留 copy_text（用户原始输入），管线中的 generate_copy 节点会处理
+        result["evaluation"] = {
+            "score": 0,
+            "level": "进入创作管线",
+            "report": "Agent 已判断需要完整的图文创作流程，正在进入自动化管线...",
+            "suggestions": [],
+        }
+    else:
+        # 纯对话：构造兼容旧 API 的 evaluation 结构
+        result["evaluation"] = {
+            "score": prev_eval.get("score", 0) if prev_eval else 0,
+            "level": "对话回复",
+            "report": final_answer,
+            "suggestions": [],
+        }
+
+    print(f"[Graph:agent] {'→ 进入管线' if should_enter else '→ 对话结束'} (工具调用: {len(tool_log)}次)")
+    return result
 
 
 # ============================================================
@@ -366,19 +603,29 @@ def decide_skills(state: AgentState) -> Dict[str, Any]:
 # ============================================================
 
 def execute_all_skills(state: AgentState) -> Dict[str, Any]:
-    """并行执行 Skill1/2/3（ThreadPoolExecutor），合并去重"""
+    """并行执行 Skill1/2/3（ThreadPoolExecutor），合并去重
+
+    跳过时优先用 prev_*（上轮保留的数据），回退到 user_input。
+    这样 optimize/modify 路径不会丢失上一轮的标签/图片/配乐。
+    """
     text = state.get("copy_text", "")
     user_input = state.get("user_input", {})
     need_tags = state.get("need_tags", False)
     need_images = state.get("need_images", False)
     need_music = state.get("need_music", False)
     emotion = state.get("emotion", {})
-    new_log = []  # 增量日志，Annotated reducer 自动合并
+
+    # 跳过时的默认值：prev_* > user_input
+    fallback_tags = state.get("prev_tags", []) or user_input.get("tags", [])
+    fallback_images = state.get("prev_images", []) or user_input.get("images", [])
+    fallback_music = state.get("prev_music", []) or user_input.get("music", [])
+
+    new_log = []
     from concurrent.futures import ThreadPoolExecutor
 
     def _run_skill1():
         if not need_tags:
-            return ("Skill1", "skipped", user_input.get("tags", []))
+            return ("Skill1", "skipped", fallback_tags)
         try:
             from skills.hashtag_recommender import HashtagRecommender
             tr = HashtagRecommender.recommend(text, count=10)
@@ -389,7 +636,7 @@ def execute_all_skills(state: AgentState) -> Dict[str, Any]:
 
     def _run_skill2():
         if not need_images:
-            return ("Skill2", "skipped", user_input.get("images", []))
+            return ("Skill2", "skipped", fallback_images)
         try:
             from skills.image_recommender import recommend_images
             ir = recommend_images(text, count=4)
@@ -399,7 +646,7 @@ def execute_all_skills(state: AgentState) -> Dict[str, Any]:
 
     def _run_skill3():
         if not need_music:
-            return ("Skill3", "skipped", user_input.get("music", []))
+            return ("Skill3", "skipped", fallback_music)
         try:
             from skills.music_recommender import recommend_music
             emotion_tags = [f"#{kw}" for kw in emotion.get("keywords", [])]
@@ -424,9 +671,9 @@ def execute_all_skills(state: AgentState) -> Dict[str, Any]:
             except Exception as e:
                 results[name] = ("failed", str(e))
 
-    new_tags = results.get("Skill1", ("skipped", []))[1] if results.get("Skill1", ("skipped", []))[0] == "completed" else []
-    new_images = results.get("Skill2", ("skipped", []))[1] if results.get("Skill2", ("skipped", []))[0] == "completed" else []
-    new_music = results.get("Skill3", ("skipped", []))[1] if results.get("Skill3", ("skipped", []))[0] == "completed" else []
+    new_tags = results.get("Skill1", ("skipped", []))[1] if results.get("Skill1", ("skipped", []))[0] in ("completed", "skipped") else []
+    new_images = results.get("Skill2", ("skipped", []))[1] if results.get("Skill2", ("skipped", []))[0] in ("completed", "skipped") else []
+    new_music = results.get("Skill3", ("skipped", []))[1] if results.get("Skill3", ("skipped", []))[0] in ("completed", "skipped") else []
 
     # merge
     seen_tags = set()

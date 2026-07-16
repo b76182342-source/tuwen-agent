@@ -63,6 +63,11 @@ class AgentState(TypedDict, total=False):
     best_final_music: list
     loop_history: Annotated[list, _merge_lists]
 
+    # ======== Agent 对话 ========
+    dialogue_messages: Annotated[list, _merge_lists]  # ReAct 消息历史
+    should_enter_workflow: bool                        # LLM 是否决定进入管线
+    workflow_intent_override: str                      # 从 Agent 进入管线时的意图覆盖
+
     # ======== 终端 ========
     result: dict
     execution_log: Annotated[list, _merge_lists]

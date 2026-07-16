@@ -33,6 +33,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
   // GSAP: 路由切换 — 内容区从透明到显现
   useGSAP(() => {
+    if (!contentRef.current) return;
     gsap.fromTo(contentRef.current, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.3, ease: 'power2.out' });
   }, { dependencies: [location.pathname], scope: contentRef });
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   Table,
@@ -9,10 +9,10 @@ import {
   Form,
   Input,
   Select,
-  message,
   Tabs,
   Image,
   Tooltip,
+  App,
 } from 'antd';
 import {
   PlusOutlined,
@@ -28,24 +28,8 @@ import { materialApi, publishApi } from '@/services/api';
 import type { Material, MaterialType, PublishHistory } from '@/types';
 import { usePresetCardStagger } from '@/hooks/useAnimations';
 
-const fetchMaterials = async (
-  activeTab: string,
-  setMaterials: (m: Material[]) => void,
-  setLoading: (l: boolean) => void
-) => {
-  setLoading(true);
-  try {
-    const type = activeTab === 'all' ? undefined : (activeTab as MaterialType);
-    const response = await materialApi.getMaterials(type);
-    setMaterials(response.data);
-  } catch {
-    message.error('获取素材列表失败');
-  } finally {
-    setLoading(false);
-  }
-};
-
 const MaterialLibrary: React.FC = () => {
+  const { message, modal } = App.useApp();
   const [materials, setMaterials] = useState<Material[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('all');
@@ -61,7 +45,18 @@ const MaterialLibrary: React.FC = () => {
   const [historyList, setHistoryList] = useState<PublishHistory[]>([]);
   const [selectedHistory, setSelectedHistory] = useState<PublishHistory[]>([]);
 
-  const loadMaterials = () => fetchMaterials(activeTab, setMaterials, setLoading);
+  const loadMaterials = async () => {
+    setLoading(true);
+    try {
+      const type = activeTab === 'all' ? undefined : (activeTab as MaterialType);
+      const response = await materialApi.getMaterials(type);
+      setMaterials(response.data);
+    } catch {
+      message.error('获取素材列表失败');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // 加载发布历史
   const loadHistory = async () => {
@@ -113,7 +108,7 @@ const MaterialLibrary: React.FC = () => {
   };
 
   // 发布历史表格列
-  const historyColumns = [
+  const historyColumns = useMemo(() => [
     {
       title: '选择',
       key: 'selection',
@@ -195,7 +190,7 @@ const MaterialLibrary: React.FC = () => {
         </Tag>
       ),
     },
-  ];
+  ], [selectedHistory]);
 
   useEffect(() => {
     loadMaterials();
@@ -226,7 +221,7 @@ const MaterialLibrary: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
-    Modal.confirm({
+    modal.confirm({
       title: '确认删除',
       content: '确定要删除这个素材吗？',
       onOk: async () => {
@@ -261,7 +256,7 @@ const MaterialLibrary: React.FC = () => {
     }
   };
 
-  const columns = [
+  const columns = useMemo(() => [
     {
       title: 'ID',
       dataIndex: 'id',
@@ -289,8 +284,8 @@ const MaterialLibrary: React.FC = () => {
       key: 'semantic_tags',
       render: (tags: any[]) => (
         <Space size={[0, 4]} wrap>
-          {tags?.map((tag) => (
-            <Tag key={tag.tag}>{tag.tag}</Tag>
+          {tags?.map((tag, i) => (
+            <Tag key={tag.tag || `tag-${i}`}>{tag.tag}</Tag>
           ))}
         </Space>
       ),
@@ -330,7 +325,7 @@ const MaterialLibrary: React.FC = () => {
         </Space>
       ),
     },
-  ];
+  ], []);
 
   const tabItems = [
     { key: 'all', label: <span><FolderOutlined /> 全部素材</span> },

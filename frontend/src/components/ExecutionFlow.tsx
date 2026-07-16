@@ -46,6 +46,7 @@ const ExecutionFlow: React.FC = () => {
 
   // GSAP: 状态圆点颜色过渡
   useGSAP(() => {
+    if (!dotRef.current) return;
     gsap.to(dotRef.current, { backgroundColor: dotColor, duration: 0.3, ease: 'power2.out' });
   }, { dependencies: [dotColor] });
 
